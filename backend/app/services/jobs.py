@@ -343,7 +343,8 @@ class JobManager:
         s = self.ctx.settings
         state = s.runs_dir / "_oneshot" / f"login-{time.time_ns()}.json"
         return self._oneshot(automation, {"mode": "login_check", "state_path": str(state),
-                                          "browser_channel": s.browser_channel, "browser_headless": s.browser_headless},
+                                          "browser_channel": s.browser_channel, "browser_headless": s.browser_headless,
+                                          "browser_window_size": s.window_size},
                              timeout=180)
 
     # -------------------------------------------------------------- scheduler
@@ -501,6 +502,7 @@ class JobManager:
                 "workspace": {"data_dir": str(paths["input_dir"]), "output_dir": str(paths["output_dir"]),
                               "state_path": str(paths["state_path"])},
                 "browser_channel": s.browser_channel, "browser_headless": s.browser_headless,
+                "browser_window_size": s.window_size,
             }
             paths["job_file"].write_text(json.dumps(job), encoding="utf-8")
 

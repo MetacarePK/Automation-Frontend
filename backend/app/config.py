@@ -44,6 +44,16 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _window_size(raw: str) -> str:
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    parts = raw.split(",")
+    if len(parts) != 2 or not all(p.strip().isdigit() and 300 <= int(p) <= 8000 for p in parts):
+        raise SystemExit(f"AUTOMATION_WINDOW_SIZE must look like 1920,1080 but it is {raw!r}. Fix it in backend/.env")
+    return f"{int(parts[0])},{int(parts[1])}"
+
+
 def _int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if not raw or not raw.strip():
@@ -103,6 +113,8 @@ class Settings:
     # Browser used by the engines. Defaults match the Windows PC they were built on.
     browser_channel: str = field(default_factory=lambda: os.environ.get("AUTOMATION_BROWSER_CHANNEL", "msedge"))
     browser_headless: bool = field(default_factory=lambda: _bool("AUTOMATION_HEADLESS", False))
+    # Browser window size as "width,height". A desktop size keeps Office Ally's desktop menu visible when headless.
+    window_size: str = field(default_factory=lambda: _window_size(os.environ.get("AUTOMATION_WINDOW_SIZE", "1920,1080")))
 
     # First admin, created at startup only if no admin exists yet.
     bootstrap_admin_email: str = field(default_factory=lambda: os.environ.get("AUTOMATION_ADMIN_EMAIL", ""))

@@ -63,7 +63,7 @@ Use `--skip-network` to leave out the two website checks.
 7. **Restart test.** Start a run, `systemctl restart automation`: the run must show Interrupted (not Running),
    History is still there, and Retry continues without redoing finished rows.
 8. **Headless check (Linux).** Compare one headless run's result sheet with the same sheet run on your Windows PC.
-   Headless browsers can behave differently; do not rely on it until the outputs match.
+   Headless browsers can behave differently; do not rely on it until the outputs match. (The runner already sets a 1920x1080 window via `AUTOMATION_WINDOW_SIZE`; without it Office Ally shows a mobile layout and the login fails.)
 
 Only after steps 1 to 8 pass should the remaining automations be moved.
 

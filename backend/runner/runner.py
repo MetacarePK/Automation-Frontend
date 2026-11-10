@@ -39,21 +39,35 @@ def emit(payload: dict) -> None:
         sys.__stdout__.flush()
 
 
-def patch_browser(channel: str | None, headless: bool | None) -> None:
+def launch_kwargs(kwargs: dict, channel, headless, window_size) -> dict:
+    """The engine's browser launch options with the server's overrides applied.
+
+    The window size matters: the engines open their browser with no fixed viewport, so a headless browser
+    gets a tiny default window (800x513). Office Ally then shows its MOBILE layout, which hides the Login menu
+    the engine clicks, and the login times out. A desktop-sized window gives the layout the engines were built for.
+    """
+    kwargs = dict(kwargs)
+    if channel:
+        if channel == "chromium":
+            kwargs.pop("channel", None)          # Playwright's bundled Chromium
+        else:
+            kwargs["channel"] = channel
+    if headless is not None:
+        kwargs["headless"] = headless
+    if window_size:
+        args = [a for a in (kwargs.get("args") or []) if not str(a).startswith("--window-size")]
+        kwargs["args"] = args + [f"--window-size={window_size}"]
+    return kwargs
+
+
+def patch_browser(channel: str | None, headless: bool | None, window_size: str | None = None) -> None:
     """Override how every engine launch() call starts its browser."""
     from playwright.sync_api import BrowserType
 
     original = BrowserType.launch
 
     def launch(self, *args, **kwargs):
-        if channel:
-            if channel == "chromium":
-                kwargs.pop("channel", None)      # Playwright's bundled Chromium
-            else:
-                kwargs["channel"] = channel
-        if headless is not None:
-            kwargs["headless"] = headless
-        return original(self, *args, **kwargs)
+        return original(self, *args, **launch_kwargs(kwargs, channel, headless, window_size))
 
     BrowserType.launch = launch
 
@@ -95,7 +109,7 @@ def mode_run(job: dict) -> int:
     engine.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     engine.STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    patch_browser(job.get("browser_channel") or None, job.get("browser_headless"))
+    patch_browser(job.get("browser_channel") or None, job.get("browser_headless"), job.get("browser_window_size"))
 
     column_map = job.get("column_map") or {}
     resolved = resolve_column_map(column_map)
@@ -171,7 +185,7 @@ def mode_login_check(job: dict) -> int:
     state = Path(job["state_path"])
     state.parent.mkdir(parents=True, exist_ok=True)
     engine.STATE_PATH = state
-    patch_browser(job.get("browser_channel") or None, job.get("browser_headless"))
+    patch_browser(job.get("browser_channel") or None, job.get("browser_headless"), job.get("browser_window_size"))
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge", headless=False, args=["--start-maximized"])
@@ -188,7 +202,7 @@ def mode_login_check(job: dict) -> int:
 def mode_browser_check(job: dict) -> int:
     """Can this machine start the configured browser at all (no site visited)?"""
     from playwright.sync_api import sync_playwright
-    patch_browser(job.get("browser_channel") or None, job.get("browser_headless"))
+    patch_browser(job.get("browser_channel") or None, job.get("browser_headless"), job.get("browser_window_size"))
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="msedge", headless=False)
         try:

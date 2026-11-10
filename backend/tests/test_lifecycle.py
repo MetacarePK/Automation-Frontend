@@ -360,3 +360,11 @@ def test_run_details_show_the_selected_configuration_and_no_secrets(make_client)
     assert config["column_map"]["name"] == "Patient"
     text = json.dumps(run)
     assert "Sup3rSecret" not in text and "sheet_sha256" not in text and "/runs/" not in run["sheet_name"]
+
+
+def test_every_run_is_told_to_use_the_desktop_window_size(make_client, settings):
+    settings.window_size = "1600,900"
+    c = make_client("u@example.com")
+    run = wait_for(c, run_of(c, [("Ann", "1")]))
+    job = json.loads((settings.runs_dir / str(run["id"]) / "job.json").read_text())
+    assert job["browser_window_size"] == "1600,900" and job["browser_headless"] is False

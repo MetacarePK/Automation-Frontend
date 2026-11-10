@@ -261,7 +261,7 @@ memory use. Those are the manual checks in `deploy/README.md` Part 3.
 ## 15. Known gaps and limits
 
 - Not yet validated on a real server or against real Office Ally (Part 3 of the deploy guide).
-- Headless Linux is unverified (the engines use `no_viewport=True`, so window size may differ).
+- Headless Linux is only partly verified. The engines open the browser with `no_viewport=True`, so a headless window defaults to 800x513 and Office Ally shows its mobile layout (the Login menu is hidden and the login times out). The runner therefore adds `--window-size` (`AUTOMATION_WINDOW_SIZE`, default `1920,1080`) to every launch; this was proven on the login menu step of both engines, but later steps (Practice Mate pages) have not been run headless.
 - Engine output can contain patient names (it is redacted for secrets only); set `AUTOMATION_ENGINE_LOG=off` to store none. It is visible only to the run's owner and admins and is purged with the run's files.
 - If the whole server is killed without a clean stop, orphaned browsers are ended by systemd's control-group stop or by the container stopping (not by the dashboard itself).
 - The Docker image has never been built or started by the author (no Docker available); `preflight` inside the container is its first test.

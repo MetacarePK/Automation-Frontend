@@ -151,7 +151,8 @@ def preflight(ctx: Context, check_network: bool = True) -> int:
 
     if os.name != "nt" and not s.browser_headless and not os.environ.get("DISPLAY"):
         add("FAIL", "display", "a visible browser needs a display but DISPLAY is not set: use AUTOMATION_HEADLESS=true or a virtual display (xvfb)")
-    event = _runner(ctx, {"mode": "browser_check", "browser_channel": s.browser_channel, "browser_headless": s.browser_headless}, timeout=120)
+    event = _runner(ctx, {"mode": "browser_check", "browser_channel": s.browser_channel, "browser_headless": s.browser_headless,
+                              "browser_window_size": s.window_size}, timeout=120)
     add("PASS" if event.get("ok") else "FAIL",
         f"browser '{s.browser_channel}' headless={s.browser_headless}",
         f"started, version {event.get('version')}" if event.get("ok") else event.get("error", "could not start") + "  (python -m playwright install " + s.browser_channel + ")")

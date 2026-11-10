@@ -91,3 +91,36 @@ def test_sheet_fingerprint_ignores_file_bytes_but_not_content(tmp_path):
     assert sheet_fingerprint(a) == sheet_fingerprint(b)
     assert sheet_fingerprint(a) != sheet_fingerprint(make("c.xlsx", [["Patient", "DOB"], ["Ann", "2"]]))
     assert sheet_fingerprint(a) != sheet_fingerprint(make("d.xlsx", [["Patient", "DOB"], [None, None], ["Ann", "1"]]))  # row numbers matter
+
+
+def _runner_module():
+    import importlib.util
+    path = pathlib.Path(__file__).resolve().parents[1] / "runner" / "runner.py"
+    spec = importlib.util.spec_from_file_location("runner_under_test", path)
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
+def test_the_runner_forces_a_desktop_window_so_office_ally_shows_its_desktop_menu():
+    launch_kwargs = _runner_module().launch_kwargs
+    engine_call = {"channel": "msedge", "headless": False, "args": ["--start-maximized"]}       # exactly what the engines pass
+    out = launch_kwargs(engine_call, "chromium", True, "1920,1080")
+    assert out == {"headless": True, "args": ["--start-maximized", "--window-size=1920,1080"]}   # msedge channel dropped
+    assert engine_call["channel"] == "msedge"                                                    # the input is not modified
+    assert launch_kwargs({"args": ["--window-size=800,600"]}, None, None, "1920,1080")["args"] == ["--window-size=1920,1080"]
+    assert launch_kwargs({}, "msedge", False, None) == {"channel": "msedge", "headless": False}   # Windows: nothing extra added
+
+
+def test_window_size_setting_is_validated(isolated_env):
+    import os
+    import pytest
+    from app.config import Settings
+    assert Settings().window_size == "1920,1080"
+    os.environ["AUTOMATION_WINDOW_SIZE"] = "1366, 768"
+    assert Settings().window_size == "1366,768"
+    os.environ["AUTOMATION_WINDOW_SIZE"] = ""
+    assert Settings().window_size == ""                       # switched off
+    for bad in ("big", "1920", "10,10", "1920,1080,3"):
+        os.environ["AUTOMATION_WINDOW_SIZE"] = bad
+        with pytest.raises(SystemExit):
+            Settings()
