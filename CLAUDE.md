@@ -15,3 +15,5 @@ Commands: `cd backend && python -m pytest tests -q` (about 2 minutes). Start: `.
 Never run the real engines to test (they open Office Ally); use `backend/tests/fake_automations/fake-auto`.
 
 Server checks: `python -m app.cli preflight`, `python -m app.cli check-login <slug>` (real, read-only sign-in; needs the user's go-ahead). The suite cannot prove Office Ally works from a server; see `deploy/README.md` Part 3.
+
+Docker: `Dockerfile`, `docker-compose.yml`, `deploy/docker/` (entrypoint links each automation's `.env` into the `/data` volume; credentials.update writes through that link). The image was written without Docker available to build it: it is unverified until `docker compose exec app python -m app.cli preflight` passes on the server.

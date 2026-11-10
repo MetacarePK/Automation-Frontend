@@ -1,0 +1,37 @@
+# The dashboard as ONE container behind the Caddy that is already running on this server.
+# Nothing is published on the host: Caddy reaches the container over a shared Docker network.
+# Settings come from .env next to this file (copy deploy/docker/env.example, never commit it).
+name: automation
+
+services:
+  app:
+    build: .
+    image: automation-dashboard:latest
+    container_name: automation-app
+    init: true                    # reaps zombie processes (browsers) so none pile up
+    restart: unless-stopped
+    env_file: .env
+    shm_size: "1gb"               # Chromium needs more shared memory than Docker's 64 MB default
+    mem_limit: ${AUTOMATION_MEM_LIMIT:-6g}
+    cpus: ${AUTOMATION_CPUS:-3}
+    pids_limit: 2048
+    stop_grace_period: 40s
+    volumes:
+      - data:/data                # database, run files, Office Ally logins
+    networks:
+      - web
+    expose:
+      - "8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  web:
+    external: true
+    name: ${CADDY_NETWORK:?set CADDY_NETWORK in .env, see deploy/docker/README.md}
+
+volumes:
+  data:

@@ -1,5 +1,7 @@
 # Deploying and verifying on the server
 
+**Ubuntu with Docker already running (your case): use `deploy/docker/README.md`** (one container behind your existing Caddy, domain `automation.metacare.one`). This file's Part 1 is the non-Docker alternative; **Part 2 and Part 3 apply to both** (inside Docker, prefix the commands with `docker compose exec app`).
+
 Two Blackhill automations first (ACO and Non ACO). Nothing here is "done" until the checks in **Part 3** pass on
 the real server with real Office Ally logins. The automated tests prove the dashboard logic; they cannot prove
 Office Ally works from your server.

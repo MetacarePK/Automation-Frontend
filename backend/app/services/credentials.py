@@ -88,7 +88,9 @@ def update(automation, values: dict) -> list[str]:
     if not changes:
         raise CredentialError("Nothing to update.")
 
-    path = env_path(automation)
+    # In a container the file is a link into a persistent volume. Write to the REAL file so the link
+    # (and therefore the saved login) survives, and so the atomic replace happens inside that volume.
+    path = env_path(automation).resolve()
     parsed = _parse(path)
     replaced = set()
     for key in changes:

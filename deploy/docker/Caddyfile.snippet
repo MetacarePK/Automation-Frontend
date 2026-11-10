@@ -1,0 +1,9 @@
+# Add this block to the Caddyfile your EXISTING caddy container already uses (it already serves the other app).
+# "automation-app" is the container name from docker-compose.yml; it resolves because both containers share one Docker network.
+automation.metacare.one {
+	encode gzip
+	request_body {
+		max_size 30MB
+	}
+	reverse_proxy automation-app:8000
+}

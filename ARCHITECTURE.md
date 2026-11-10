@@ -54,7 +54,8 @@ automations/<slug>/main.py, patients.py, parallel.py   (unchanged engine)  --> P
 | `automations/<slug>/` | `manifest.json` + engine + that automation's own `.env` (Office Ally login) |
 | `frontend/` | HTML stubs + `static/*.js` (`app.js` shared: `h()`, `api()`, `shell()`, `runPanel()`), one `styles.css` |
 | `backend/tests/` | pytest suite with a fake engine (`tests/fake_automations/fake-auto`, copied as `fake-auto-2`) |
-| `deploy/` | Caddyfile, hardened systemd unit, `harden.sh`, server + verification instructions |
+| `deploy/` | Caddyfile, hardened systemd unit, `harden.sh`, server + verification instructions; `deploy/docker/` (entrypoint, env example, Caddy snippet, guide) |
+| `Dockerfile`, `docker-compose.yml` | One container (Python + Playwright Chromium, non-root) on the existing Caddy's Docker network, no published ports, `/data` volume (database, run files, `secrets/<slug>.env` logins) |
 
 ## 3. Core concepts
 
@@ -262,7 +263,8 @@ memory use. Those are the manual checks in `deploy/README.md` Part 3.
 - Not yet validated on a real server or against real Office Ally (Part 3 of the deploy guide).
 - Headless Linux is unverified (the engines use `no_viewport=True`, so window size may differ).
 - Engine output can contain patient names (it is redacted for secrets only); set `AUTOMATION_ENGINE_LOG=off` to store none. It is visible only to the run's owner and admins and is purged with the run's files.
-- If the whole server is killed without a clean stop, orphaned browsers are ended by systemd's control-group stop (not by the dashboard itself).
+- If the whole server is killed without a clean stop, orphaned browsers are ended by systemd's control-group stop or by the container stopping (not by the dashboard itself).
+- The Docker image has never been built or started by the author (no Docker available); `preflight` inside the container is its first test.
 - Non ACO no longer reuses a saved Office Ally session between runs (each run signs in fresh in its own folder, as ACO always did).
 - Changing a sheet's content starts it from scratch (by design); the engine's own duplicate check against Office Ally still prevents double visits.
 - No notifications; no email password reset; one server, one database file.

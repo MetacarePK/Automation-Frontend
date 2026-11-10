@@ -179,3 +179,17 @@ def test_shipped_env_files_have_no_inline_comments_because_systemd_and_start_bat
         for line in (Path(__file__).resolve().parents[1] / name).read_text().splitlines():
             if line.startswith("AUTOMATION_"):
                 assert not re.search(r"\s#", line), f"{name}: inline comment would break systemd/start.bat: {line}"
+
+
+def test_the_docker_env_example_loads_cleanly_and_has_no_inline_comments(isolated_env):
+    import re
+    from pathlib import Path
+    from app.config import load_env_file, Settings
+    example = Path(__file__).resolve().parents[2] / "deploy" / "docker" / "env.example"
+    for line in example.read_text().splitlines():
+        if re.match(r"^[A-Z_]+=", line):
+            assert not re.search(r"\s#", line), f"inline comment would be kept as part of the value by Docker: {line}"
+    load_env_file(example)
+    s = Settings()
+    assert s.cookie_secure is True and s.trust_proxy is True and s.allowed_origins == ("https://automation.metacare.one",)
+    assert s.max_total_workers == 4 and s.max_workers_per_run == 2 and s.retention_files_days == 30

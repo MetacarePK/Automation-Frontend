@@ -124,3 +124,18 @@ def test_admin_can_grant_the_right_when_approving_and_later_change_it(make_clien
     bad = admin.put(f"/api/admin/users/{uid}/access", json={"automations": ["fake-auto"], "credentials": ["fake-auto-2"]})
     assert bad.status_code == 400 and "can use" in bad.json()["detail"]
     c.__exit__(None, None, None)
+
+
+def test_a_login_file_that_is_a_link_into_a_volume_keeps_its_link_when_updated(make_client, settings, tmp_path):
+    """Docker keeps each automation's .env in a persistent volume and links it into the engine folder."""
+    volume = tmp_path / "volume"; volume.mkdir()
+    real = volume / "fake-auto.env"
+    real.write_text("username=fakeuser\npassword=Sup3rSecret!\n")
+    link = settings.automations_dir / "fake-auto" / ".env"
+    link.unlink(); link.symlink_to(real)
+    admin = make_client("admin@example.com", role="admin")
+    assert admin.get("/api/automations/fake-auto/credentials").json()["fields"][0]["value"] == "fakeuser"
+    assert admin.put("/api/automations/fake-auto/credentials", json=NEW).status_code == 200
+    assert link.is_symlink() and link.resolve() == real.resolve()          # the link was not replaced by a plain file
+    assert "username=newuser" in real.read_text() and not list(volume.glob("*.tmp"))
+    assert stat.S_IMODE(os.stat(real).st_mode) == 0o600

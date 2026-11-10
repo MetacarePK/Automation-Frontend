@@ -1,0 +1,10 @@
+# Exactly the versions the 86 automated tests and the browser checks ran with. Used by the Docker image.
+fastapi==0.115.6
+starlette==0.41.3
+pydantic==2.13.5
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+openpyxl==3.1.5
+psutil==7.2.2
+bcrypt==4.0.1
+playwright==1.62.0
