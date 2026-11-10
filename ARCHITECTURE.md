@@ -1,264 +1,268 @@
 # Architecture (read this first if you are an AI or a new developer)
 
-This file is the precise technical map of the project. For a plain-language tour read `OVERVIEW.md`.
+The precise technical map of the project. For a plain-language tour read `OVERVIEW.md`; for server steps `deploy/README.md`.
 Everything below describes what exists in the code today; paths are relative to `app/`.
 
-## 1. The core idea in five sentences
+## 1. The core idea in six sentences
 
-1. Billing "automations" (Playwright bots that create visits in Office Ally Practice Mate from an Excel sheet) already exist
-   as independent Python programs ("engines") that have run on a Windows PC for months. **They are never modified.**
+1. Billing "automations" (Playwright bots that create visits in Office Ally Practice Mate from an Excel sheet) already exist as
+   independent Python programs ("engines") that ran on a Windows PC for months. **They are never modified.**
 2. This project is a **multi-user web dashboard** (FastAPI + SQLite + plain JS) that wraps those engines.
-3. A user uploads a sheet, the server **queues a run**, and a **separate OS process (the runner)** imports the engine,
-   points its paths at that user's workspace, runs it, and streams per-row progress back as text lines.
-4. The server stores users, sessions, runs, per-row results and an audit trail in SQLite; sheets and result files live on disk.
-5. Adding an automation means adding a folder (`engine + manifest.json`); the dashboard discovers it at startup.
+3. A user uploads a sheet; the server **queues a run**; a **scheduler** starts it when capacity allows; a **separate OS process
+   (the runner)** imports the engine, points its paths at that run's private folder, runs it, and streams per-row progress back.
+4. Every run has its own folder, log, state and outputs. A run is only reported **completed after its result sheet was read back
+   and matched against the database**. Crashes, cancels, restarts and partial failures end in an accurate state and can be retried safely.
+5. The server stores users, sessions, runs, per-row results, run events and an audit trail in SQLite; sheets and result files live on disk
+   and are removed by a retention policy.
+6. Adding an automation means adding a folder (`engine + manifest.json`); the dashboard discovers it at startup.
 
 ## 2. Component map
 
 ```
-Browser (static HTML/ES-module JS, polling)
+Browser (static HTML / ES-module JS, polling)
    |  JSON over HTTPS, session cookie
    v
-FastAPI app  backend/app/main.py  (create_app factory; app.state.ctx = Context)
-   |-- routers/        auth, account, automations, runs, admin      (HTTP layer, thin)
+FastAPI app  backend/app/main.py        create_app(settings) -> app.state.ctx = Context(settings, db, registry, jobs)
+   |-- routers/        auth, account, automations (+ Office Ally login), runs, admin     (HTTP layer)
    |-- deps.py         Context, current-user dependencies, CSRF/origin check
-   |-- services/jobs.py      JobManager: queue + supervises runner processes   <- the heart
-   |-- services/registry.py  loads automations/*/manifest.json
-   |-- services/audit.py     writes activity_logs and login_events
+   |-- services/jobs.py        JobManager: scheduler + run supervisor                    <- the heart
+   |-- services/procs.py       ProcessTracker: finds and kills every process a run started
+   |-- services/verify.py      reads the result sheet back and compares it with the database
+   |-- services/redact.py      secret redaction for logs
+   |-- services/retention.py   removes old files / row details
+   |-- services/credentials.py reads and writes an automation's Office Ally login (.env)
+   |-- services/registry.py    loads automations/*/manifest.json
+   |-- services/audit.py       activity_logs and login_events
    |-- db.py / security.py / config.py / cli.py
    |
-   |  subprocess.Popen  (one process per run, stdout = event stream)
+   |  subprocess.Popen (one process per run; stdout = event stream)
    v
-backend/runner/runner.py  (cwd = engine folder; imports the engine as `main`, `patients`, `parallel`)
-   |  patches engine globals, launches the engine's run_automation()
+backend/runner/runner.py        cwd = engine folder; the ONLY code that imports an engine
+   |  patches engine globals + browser launch, calls the engine's run_automation()
    v
-automations/<slug>/main.py, patients.py, parallel.py  (unchanged engine)  --> Playwright --> Office Ally
+automations/<slug>/main.py, patients.py, parallel.py   (unchanged engine)  --> Playwright --> Office Ally
 ```
 
 | Path | Responsibility |
 |---|---|
-| `backend/app/main.py` | `create_app(settings)` factory. Security-header + origin (CSRF) middleware, router registration, HTML page routes with server-side auth gating, `/static`, `/healthz`, `/favicon.ico` |
-| `backend/app/config.py` | `Settings` dataclass read from env vars. `load_env_file()` reads `backend/.env` (called by `get_settings()` only; real env vars win) |
-| `backend/app/db.py` | `MIGRATIONS` (append-only SQL list), `init_db`, `connect`, `Database.session()` / `.transaction()`, `utcnow()` |
-| `backend/app/deps.py` | `Context` dataclass, `load_session_user`, `optional_user` / `require_user` / `require_admin`, `check_origin` |
-| `backend/app/security.py` | bcrypt hashing, password policy, session-token generation and hashing, email validation |
-| `backend/app/cli.py` | `create_admin`, `ensure_bootstrap_admin` (from `.env` at startup), `python -m app.cli create-admin|list-users` |
-| `backend/app/routers/*.py` | HTTP endpoints (section 6). Business rules live here and in `jobs.py` |
-| `backend/app/services/jobs.py` | `JobManager`: per-automation worker threads, run lifecycle, process supervision, one-shot `describe`/`validate` calls |
-| `backend/app/services/registry.py` | Manifest loading and validation, `Automation` dataclass |
-| `backend/app/services/audit.py` | `log_activity`, `log_login`, `client_ip` |
-| `backend/runner/runner.py` | Adapter executed once per job/inspection. The ONLY code that imports an engine |
-| `automations/<slug>/` | `manifest.json` + engine files + that automation's own `.env` (Office Ally credentials) |
-| `frontend/*.html`, `frontend/static/*.js` | Pages and scripts (no build step); `app.js` is the shared library, `styles.css` the only stylesheet |
-| `storage/` | Runtime data (gitignored): DB, workspaces, run logs |
-| `deploy/` | Caddyfile, systemd unit, server instructions |
-| `backend/tests/` | 38 pytest tests with a fake engine in `tests/fake_automations/fake-auto/` |
+| `backend/app/main.py` | App factory, security-header + origin middleware, routers, HTML page routes (server-side auth gating), `/static`, `/healthz` |
+| `backend/app/config.py` | `Settings` from env vars; `load_env_file()` reads `backend/.env` (used by `get_settings()` only; real env vars win) |
+| `backend/app/db.py` | `MIGRATIONS` (append-only), `FK_OFF_MIGRATIONS` (table rebuilds), `init_db`, `Database.session()/transaction()`, `utcnow()` |
+| `backend/app/services/jobs.py` | Scheduler, run lifecycle, paths (`run_paths`, `resume_store`, `staging_dir`), `sheet_fingerprint`, `RunLog`, retry |
+| `backend/app/cli.py` | `create-admin`, `list-users`, `preflight`, `check-login`; `ensure_bootstrap_admin` at startup |
+| `backend/runner/runner.py` | Modes `describe`, `validate`, `run`, `login_check`, `browser_check` |
+| `automations/<slug>/` | `manifest.json` + engine + that automation's own `.env` (Office Ally login) |
+| `frontend/` | HTML stubs + `static/*.js` (`app.js` shared: `h()`, `api()`, `shell()`, `runPanel()`), one `styles.css` |
+| `backend/tests/` | pytest suite with a fake engine (`tests/fake_automations/fake-auto`, copied as `fake-auto-2`) |
+| `deploy/` | Caddyfile, hardened systemd unit, `harden.sh`, server + verification instructions |
 
-## 3. Core concepts (the vocabulary used in code)
+## 3. Core concepts
 
 | Concept | Definition |
 |---|---|
-| **Automation** | A folder in `automations/` with `manifest.json`, `main.py`, `patients.py` (and usually `parallel.py`). Identified by `slug` (equals the folder name) |
-| **Engine** | The automation's Python code. Treated as a black box with a fixed contract (section 4) |
-| **Manifest** | Dashboard-facing description: name, description, accent color, sheet field lists, required fields, insurance-ID label |
-| **Run** | One execution of one automation on one sheet by one user. Row in `runs`, status `queued -> running -> succeeded/failed/cancelled` |
-| **Runner** | `runner.py` process that executes a run (or a quick `describe`/`validate`) against an engine |
-| **Workspace** | Per user, per automation folder holding that user's uploaded sheets and engine outputs |
-| **Column map** | Dict `{field_key: sheet_header}` chosen by the user; remembered per sheet layout in `column_mappings` |
-| **Context** | `Context(settings, db, registry, jobs)` stored at `app.state.ctx`; reached in routes via `Depends(get_ctx)` |
-| **Status** | Row result string from the engine: `Done...`, `Not Created`; "duplicate" = `Done` with `duplicate_of` set |
+| **Automation** | Folder in `automations/` identified by `slug` (= folder name) |
+| **Engine** | The automation's Python code, a black box with a fixed contract (section 4) |
+| **Manifest** | Dashboard-facing description: name, accent colour, sheet fields, `required_fields`, `insurance_id_label`, optional `max_concurrent_runs` (default 1) and `credential_fields` |
+| **Run** | One execution of one automation on one sheet by one user. Row in `runs` |
+| **Run states** | `queued -> validating -> running -> completed \| completed_with_errors \| failed \| interrupted \| cancelled` |
+| **Failure kind** | `login_failed`, `invalid_input`, `config_error` (permanent), `crash` (transient, retried once), `timeout`, `engine_error`, `verification_failed`, `interrupted` |
+| **Run folder** | `storage/runs/<id>/`: `input/` (private copy of the sheet), `output/`, `auth_state.json` (deleted after the run), `run.log`, `job.json` |
+| **Resume store** | `storage/workspaces/<slug>/user-<id>/resume/<sheet fingerprint>/<stem>_with_status.xlsx`: the latest readable status sheet for that exact sheet content; seeded into the next run's output folder so finished rows are skipped |
+| **Sheet fingerprint** | Hash of the sheet's cell values + row numbers (not file bytes), so re-saving in Excel keeps progress but a different sheet with the same name never inherits it |
+| **Retry chain** | Runs linked by `retry_of` / `attempt` |
+| **Carried over** | Rows that were already Done from earlier runs (reported by the runner's `resume` event) |
+| **Context** | `Context(settings, db, registry, jobs)` at `app.state.ctx`, reached by `Depends(get_ctx)` |
 
 ## 4. The engine contract (what an automation must provide)
 
-`runner.py` relies on exactly this; the two Blackhill engines satisfy it unchanged.
-
-**`patients.py`**
-- `DEFAULT_COLUMN_MAP: dict` mapping field keys to default sheet headers. Keys used: `name, dob, provider, dos, cpt, pos,
-  modifier, icd10, facility, beneficiary_id, visit_id, line_charge, status`.
-- `resolve_column_map(column_map) -> dict` (defaults overlaid with the caller's overrides).
-- `read_patients(xlsx_path, column_map) -> list[dict]`; on a bad sheet it **raises `SystemExit(message)`** (the runner converts
-  that to a clean error).
+**`patients.py`**: `DEFAULT_COLUMN_MAP` (keys `name, dob, provider, dos, cpt, pos, modifier, icd10, facility, beneficiary_id, visit_id,
+line_charge, status`), `resolve_column_map(map)`, `read_patients(xlsx, column_map)` (raises `SystemExit(message)` on a bad sheet).
 
 **`main.py`**
-- Module globals the runner **overwrites before the run**: `DATA_DIR`, `OUTPUT_DIR`, `STATE_PATH` (saved Office Ally login).
-  The engine reads these globals at call time, which is why patching them works. It derives result files from `OUTPUT_DIR`
-  (`<sheet>_with_status.xlsx`, `_results.csv`, `_visits.csv`, `logs.txt`) and resumes from the status file.
-- `run_automation(excel_path, column_map, workers, limit, only, no_resume, make_visit, save_visit, allow_duplicate,
-  no_wait, interactive, progress_hook, retries)` returning a dict with `logged_in`, `done`, `total`, `captured_columns`,
-  `status_xlsx_path`, ...
-- `progress_hook(group_status, group_captured, result)` is called after each visit, possibly from worker **threads**.
-- Credentials are read from the engine's own `.env` (`ENV_PATH` in its folder): `user:`/`password:` or `key=value`.
+- Module globals the runner **overwrites per run**: `DATA_DIR`, `OUTPUT_DIR`, `STATE_PATH`. The engine reads them at call time.
+- `run_automation(excel_path, column_map, workers, limit, only, no_resume, make_visit, save_visit, allow_duplicate, no_wait, interactive,
+  progress_hook, retries)` -> dict with `logged_in`, `done`, `total`, `captured_columns`, `status_xlsx_path`.
+- `progress_hook(group_status, group_captured, result)` after each visit, possibly from worker threads.
+- `status_xlsx_path_for(excel)`, `read_previous_status(status_path, column_map)` (the resume mechanism: row -> Status, `Done...` rows are skipped).
+- `log_in(browser)` -> `(context, page, logged_in)` (used by the `login_check` mode).
+- Credentials come from `.env` in the engine's own folder (`username`/`user`, `password`/`pass`; `key=value` or `key: value`).
+- The engine writes a **Status column** into a copy of the sheet after every row (`Done...` / `Not Created`); row numbers = Excel rows.
 
-**Engine facts that shape the design**
-- Both engines name their modules `main`, `patients`, `parallel` -> they cannot coexist in one Python process.
-- `run_automation()` replaces `sys.stdout`/`sys.stderr` process-wide while running.
-- They launch Playwright with `channel="msedge"`, `headless=False`, `--start-maximized` (visible window).
-- Blackhill ACO deletes `auth_state.json` and logs in fresh every run; Non ACO reuses it. Each automation logs in to its own
-  Office Ally account; two parallel windows on one login can hang -> **one run at a time per automation**.
+Facts that shape the design: both engines name their modules `main`/`patients`/`parallel` (cannot share a process); `run_automation()`
+replaces `sys.stdout` process-wide; they launch Edge visibly (`channel="msedge"`, `headless=False`); ACO logs in fresh every run, Non ACO
+reuses a saved session; each automation uses one Office Ally account and two windows on one login can hang.
 
 ## 5. The runner protocol
 
-Command: `python backend/runner/runner.py <job.json>` with `cwd = engine folder`. `job.json` always has `mode` and `engine_dir`.
+`python backend/runner/runner.py <job.json>`; `job.json` has `mode` (and `engine_dir` except for `browser_check`). Events are stdout lines
+`@@EVENT {json}` written to `sys.__stdout__`; everything else is engine output.
 
-| Mode | Input | Output event (stdout line `@@EVENT {json}`) |
-|---|---|---|
-| `describe` | - | `{"type":"describe","default_map":{...}}` |
-| `validate` | `excel_path`, `column_map` | `{"type":"validated","ok":true,"total":N}` or `{"ok":false,"error":"..."}` |
-| `run` | `excel_path`, `column_map`, `save`, `workers`, `limit`, `only`, `allow_duplicate`, `no_resume`, `workspace{data_dir,output_dir,state_path}`, `browser_channel`, `browser_headless` | many `{"type":"rows","rows":[{row,patient_name,dos,status,visit_id,beneficiary_id,duplicate_of,error,line_charges,note}]}` then one `{"type":"finished","ok":bool,"error"?,"summary"?,"done","total","status_xlsx"}` |
+| Mode | Output events |
+|---|---|
+| `describe` | `{"type":"describe","default_map":{...}}` |
+| `validate` | `{"type":"validated","ok":true,"total":N}` or `ok:false,error` (uses the engine's own reader) |
+| `run` | `{"type":"resume","carried":N}`, many `{"type":"rows","rows":[...]}`, then `{"type":"finished","ok","done","total","status_xlsx","status_column","summary"\|"error"}` |
+| `login_check` | `{"type":"login_check","ok":bool,"url":...}`: a REAL sign-in, deletes its session file, changes nothing in Office Ally |
+| `browser_check` | `{"type":"browser_check","ok":true,"version":...}`: starts the configured browser on `about:blank` |
 
-- Events are written to `sys.__stdout__` (the real pipe) because the engine replaces `sys.stdout`. All other stdout/stderr
-  lines are the engine's normal output; the server appends them to `storage/runs/<id>/run.log`.
-- `run` mode patches `main.DATA_DIR/OUTPUT_DIR/STATE_PATH` to the user's workspace and monkey-patches
-  `playwright.sync_api.BrowserType.launch` to force `channel` (`chromium` removes it) and `headless` from settings.
-- Exit code 0 only when `finished.ok` is true. stdin is `/dev/null`, so any stray `input()` fails instead of hanging.
+`run` patches `main.DATA_DIR/OUTPUT_DIR/STATE_PATH` to the run folder and wraps `playwright BrowserType.launch` to force `channel` and `headless`.
+Exit code 0 only when `finished.ok`. stdin is closed so a stray `input()` fails instead of hanging.
 
-## 6. HTTP surface
+## 6. Scheduling and the life of a run (`services/jobs.py`)
 
-All JSON under `/api`; all state-changing requests pass the origin check; errors are `{"detail": "..."}`.
+**Submit** (`POST /automations/{slug}/run`): check access + required columns; resolve the staged upload inside the user's folder; refuse a
+second open run of the same sheet (409) and more than `max_active_per_user`; validate with the runner; insert the `runs` row with
+`not_before = HOLD` (invisible to the scheduler), copy the sheet into `runs/<id>/input/`, store the content fingerprint, then `submit()` clears HOLD.
+
+**Scheduler** (one thread; `_pick_next`): a queued run may start when
+1. `len(active) < max_concurrent_runs` (global cap);
+2. its automation has fewer active runs than the manifest's `max_concurrent_runs` (default 1, the Office Ally account lock);
+3. active browser workers + its workers <= `max_total_workers` (a run alone may exceed it);
+4. `not_before` has passed (retry backoff).
+
+A run that cannot start never blocks another automation. Among startable runs the order is **fair**: fewest active runs for that person,
+then least recently started person, then oldest run.
+
+**Execute** (one thread per run): atomically `queued -> validating` (a cancelled run is skipped), preflight (sheet exists, the automation has
+a login saved, the engine's reader accepts the sheet), create the output folder and seed it from the resume store, `-> running`, start the
+runner in its own process group, track every descendant process (`ProcessTracker` snapshots the tree every 2 s), read events (`rows` are
+upserted into `run_rows`; `resume` sets `carried_over`), write a redacted timestamped `run.log`.
+
+**Outcome** (after the process ends, then `ProcessTracker.kill_all()` so no browser can outlive the run):
+
+| Situation | Final state |
+|---|---|
+| cancel requested | `cancelled` |
+| watchdog (`run_timeout_hours`) | `failed` / `timeout` |
+| server stopping | `interrupted` |
+| runner reported `ok` and exit 0 | **verify** (below), then `completed` or `completed_with_errors` |
+| runner reported an error | `failed` with kind `login_failed` / `invalid_input` / `engine_error` |
+| process died without a verdict | `failed` / `crash` -> one automatic retry with backoff |
+
+**Verification** (`services/verify.py`): the status sheet must open, contain the engine's status column, agree with every row the runner
+reported, and its Done count must equal the engine's `done`. Otherwise the run is `failed` / `verification_failed`. `completed_with_errors` means
+any `Not Created` row, or (when no limit/filter was used) rows that reported no result.
+
+**After every outcome:** the latest readable status sheet is copied into the resume store (those rows are really saved in Office Ally and a retry
+must not redo them); `auth_state.json` is deleted; `runs`/`run_events`/`activity_logs` are updated.
+
+**Retry** (`create_retry`): only for `failed`, `interrupted`, `completed_with_errors`, `cancelled`; refused if the files were purged or the sheet is already open.
+Always forces `allow_duplicate=False` and `no_resume=False`; copies the sheet; new run links via `retry_of`, `attempt+1`. **Automatic** retry happens only for
+`crash`, at most `auto_retries` times, after `retry_backoff_seconds * 2^(attempt-1)`; never for login/input/config errors.
+
+**Cancel** (`cancel`): queued -> `cancelled` at once; validating/running -> flag + `ProcessTracker.kill_all()` (terminate, grace, kill; verifies survivors).
+
+**Restart** (`_recover`): `validating`/`running` -> `interrupted` (+ event); runs still being prepared (HOLD) -> `failed`; `queued` runs simply continue.
+
+## 7. HTTP surface
+
+JSON under `/api`; state-changing requests pass the origin check; errors are `{"detail": "..."}`. A resource the caller may not see returns **404**.
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /api/auth/signup` `login` `logout`, `GET /api/auth/me` |
+| Auth | `POST /api/auth/signup`, `login`, `logout`; `GET /api/auth/me` (includes `credential_automations`) |
 | Account | `GET /api/account/activity`, `POST /api/account/password` |
-| Automations | `GET /api/automations` (cards incl. `running_now`, `queued`, `last_run`, `active_run`), `GET /api/automations/{slug}` (manifest + `max_workers`), `POST /{slug}/upload` (multipart), `POST /{slug}/run` |
-| Runs | `GET /api/runs` (filters: automation, status, user_id[admin], limit, offset), `GET /{id}?rows=N` (header + counts + latest rows), `GET /{id}/log`, `GET /{id}/download`, `POST /{id}/cancel` |
-| Admin | `GET /api/admin/overview`, `users`, `logins`, `activity`, `sessions`; `POST /users/{id}/approve|disable|enable|reset-password|unlock`; `PUT /users/{id}/access|role`; `POST /sessions/{id}/revoke` |
-| Pages | `GET /` `/login` `/signup` `/runs` `/account` `/admin` `/a/{slug}` (HTML; server redirects by auth/role), `/static/*`, `/healthz` |
+| Automations | `GET /api/automations` (cards: `running_now`, `queued`, `last_run`, `active_run`); `GET /{slug}`; `POST /{slug}/upload`; `POST /{slug}/run` |
+| Office Ally login | `GET/PUT /api/automations/{slug}/credentials`, `POST .../credentials/test` (admin or granted person; PUT/test refused with 409 while a run is active) |
+| Runs | `GET /api/runs`; `GET /{id}?rows=&view=all\|failed\|skipped\|created` (counts incl. `pending`, `carried`, `chain`, `config`, `can_retry`, `can_cancel`); `GET /{id}/events`; `GET /{id}/log`; `GET /{id}/files`; `GET /{id}/download?file=status\|results\|visits\|failed\|log`; `POST /{id}/cancel`; `POST /{id}/retry` |
+| Admin | `GET /api/admin/overview`, `users`, `logins`, `activity`, `sessions`; `POST /users/{id}/approve\|disable\|enable\|reset-password\|unlock`; `PUT /users/{id}/access\|role`; `POST /sessions/{id}/revoke` |
+| Pages | `/`, `/login`, `/signup`, `/runs`, `/account`, `/admin`, `/a/{slug}`, `/static/*`, `/healthz` |
 
-Access rules: `require_user` for everything except signup/login/pages; `require_admin` for `/api/admin/*`. A resource the caller
-may not see returns **404** (not 403) so existence is not leaked. Admins may see/stop any run; users only their own.
+Downloads only accept a fixed set of file kinds; paths are derived on the server (never from client input). CSV cells that start like formulas are neutralised.
 
-## 7. Data model (SQLite, `storage/automation.db`, WAL, foreign keys on)
+## 8. Data model (SQLite `storage/automation.db`, WAL, foreign keys on; UTC ISO-8601 text timestamps)
 
-Timestamps are UTC ISO-8601 text (`2026-11-10T14:03:22Z`) so string comparison equals time comparison.
-
-| Table | Key columns / notes |
+| Table | Notes |
 |---|---|
-| `users` | `email` (unique, NOCASE), `password_hash` (bcrypt), `role` admin/user, `status` pending/active/disabled, `failed_attempts`, `locked_until`, `approved_by`, `last_login_at` |
-| `sessions` | `id` = sha256(cookie token), `user_id`, `expires_at` (sliding), `last_seen_at`, `ip`, `user_agent`, `revoked_at` |
-| `user_automations` | PK (`user_id`, `automation_slug`); admins bypass this table |
-| `login_events` | every attempt: `email`, `success`, `reason` (bad_password, unknown_email, pending, disabled, locked, ip_blocked), `ip`, `user_agent` |
-| `activity_logs` | `user_id`, `actor_email`, `action`, `target_type`, `target_id`, `details` (JSON), `ip` |
-| `runs` | `automation_slug`, `user_id`, `status`, `sheet_name`, `sheet_path`, `options` (JSON), `total`, `summary`, `error`, `queued_at/started_at/finished_at`, `output_path`, `cancel_requested` |
-| `run_rows` | PK (`run_id`,`row_no`); latest state per sheet row (upserted by the job manager) |
-| `column_mappings` | PK (`automation_slug`,`fingerprint`); fingerprint = sorted sheet headers joined by `|` |
-| `schema_version` | integer; drives migrations |
+| `users`, `sessions`, `login_events`, `activity_logs` | accounts (bcrypt), hashed session tokens, every sign-in attempt, audit trail |
+| `user_automations` | PK (`user_id`,`automation_slug`), `can_manage_credentials` (admins bypass) |
+| `runs` | `status` (8 states, CHECK), `failure_kind`, `sheet_path` (the run's private copy), `options` JSON (incl. `sheet_sha256` = content fingerprint), `total`, `carried_over`, `retry_of`, `attempt`, `not_before`, `output_path`, `files_purged_at`, `rows_purged_at`, `cancel_requested`, times |
+| `run_rows` | PK (`run_id`,`row_no`); latest state per sheet row for that run |
+| `run_events` | per-run timeline: `ts`, `level`, `kind`, `message`, `details` JSON (exit code, last redacted output lines) |
+| `column_mappings` | remembered column match per sheet layout and automation |
+| `schema_version` | integer driving migrations |
 
-Derived counts (in `routers/runs.py` `COUNT_SQL`): *created* = `Done%` and no `duplicate_of`; *duplicate* = `duplicate_of <> ''`;
-*not_created* = `status = 'Not Created'`.
+Counts (`routers/runs.py` `COUNT_SQL`): *successful* = `Done%` without `duplicate_of`; *skipped* = `duplicate_of <> ''`; *failed* = `Not Created`;
+*pending* = `total - seen - carried_over`.
 
-**Migrations:** `MIGRATIONS` in `db.py` is a list of SQL scripts applied in order and recorded in `schema_version`.
-Migration 1 was edited in place before any deployment; **from now on only append new entries, never edit an applied one.**
-
-## 8. Key flows
-
-**Sign up and approval.** `signup` -> row in `users` with status `pending` (identical response for existing emails) ->
-admin `approve` sets `active`, writes `user_automations` -> `login` verifies bcrypt (always runs a hash check), enforces lockout
-(5 failures/15 min, plus a per-IP cap), creates a `sessions` row (only the token's hash stored), sets an HttpOnly SameSite cookie,
-writes `login_events` + `activity_logs`.
-
-**A run.**
-1. `POST /upload`: save to `storage/workspaces/<slug>/user-<id>/data/<safe name>`, read headers with openpyxl, ask the runner for
-   `describe` (cached) and suggest a column map (remembered mapping first, then exact default-name matches).
-2. `POST /run`: check access and required fields, resolve the filename *inside the user's data dir* (never trust a client path),
-   enforce per-user cap (5 active), run the runner's `validate` (the engine's own reader), save the mapping, insert `runs`
-   (status `queued`), call `jobs.submit`.
-3. `JobManager` has **one worker thread per automation slug**; it picks the oldest `queued` run, atomically flips it to
-   `running`, writes `storage/runs/<id>/job.json`, starts the runner (new process group), and reads stdout line by line:
-   `rows` events are upserted into `run_rows`, `finished` is remembered, other lines go to `run.log`. A watchdog kills the run after
-   12 hours.
-4. On process exit the status becomes `succeeded` (finished.ok and exit 0), `cancelled` (cancel requested), or `failed`;
-   `runs` gets `finished_at`, `error`/`summary`, `output_path`; `activity_logs` gets `run_<status>`.
-5. The browser polls `GET /api/runs/{id}` every 2 s while active and `GET /api/automations` every 5 s on the dashboard.
-
-**Cancel.** `POST /cancel`: queued -> marked `cancelled` immediately; running -> `cancel_requested=1` then the process tree is
-killed (`killpg` SIGTERM then SIGKILL on POSIX, `taskkill /T /F` on Windows), which also closes the browsers.
-
-**Restart.** `JobManager.start()` marks every `running` run `failed` ("server restarted") and resumes `queued` ones. Re-running the
-same sheet skips rows the engine already marked Done (it resumes from its own status file in the user's workspace).
+**Migrations are append-only.** 1 = initial schema (edited once before any deployment; never again). 2 = rebuild `runs` with the new states/columns and add
+`run_events` (listed in `FK_OFF_MIGRATIONS` so the rebuild cannot cascade-delete `run_rows`). 3 = `user_automations.can_manage_credentials`.
 
 ## 9. Filesystem layout at runtime
 
 ```
-storage/
-  automation.db (+ -wal, -shm)
-  workspaces/<slug>/auth_state.json                saved Office Ally session, shared per automation (runs are serialised)
-  workspaces/<slug>/user-<id>/data/<sheet>.xlsx     uploaded sheets
-  workspaces/<slug>/user-<id>/output/               engine outputs: <sheet>_with_status.xlsx, _results.csv, _visits.csv, logs.txt
-  runs/<run id>/run.log, job.json                   per-run log and runner instructions (no secrets)
-  runs/_oneshot/                                    short-lived describe/validate job files
-automations/<slug>/.env                             Office Ally credentials for that automation
-backend/.env                                        server settings + first-admin bootstrap
+storage/automation.db (+ -wal, -shm)
+storage/runs/<run id>/input/<sheet>.xlsx          private copy used by that run
+storage/runs/<run id>/output/                     engine outputs: <sheet>_with_status.xlsx, _results.csv, _visits.csv, logs.txt
+storage/runs/<run id>/run.log                     structured, timestamped, redacted
+storage/runs/<run id>/job.json                    runner instructions (no secrets)
+storage/runs/<run id>/auth_state.json             saved Office Ally session; deleted when the run ends
+storage/workspaces/<slug>/user-<id>/uploads/      staged uploads waiting to become a run
+storage/workspaces/<slug>/user-<id>/resume/<fp>/  latest status sheet per sheet content
+automations/<slug>/.env                           Office Ally login (written by services/credentials.py, mode 600)
+backend/.env                                      server settings + first-admin bootstrap
 ```
 
-## 10. Configuration (env vars, optionally in `backend/.env`)
+## 10. Configuration (env vars, optionally in `backend/.env`; see `backend/.env.example`)
 
-`AUTOMATION_STORAGE_DIR`, `AUTOMATION_AUTOMATIONS_DIR`, `AUTOMATION_FRONTEND_DIR`, `AUTOMATION_COOKIE_SECURE`,
-`AUTOMATION_SESSION_HOURS` (12), `AUTOMATION_ALLOWED_ORIGINS`, `AUTOMATION_TRUST_PROXY`, `AUTOMATION_MAX_FAILED_LOGINS` (5),
-`AUTOMATION_LOCKOUT_MINUTES` (15), `AUTOMATION_AUTO_APPROVE` (false), `AUTOMATION_PYTHON`, `AUTOMATION_MAX_UPLOAD_MB` (25),
-`AUTOMATION_MAX_WORKERS` (4), `AUTOMATION_BROWSER_CHANNEL` (msedge), `AUTOMATION_HEADLESS` (false),
-`AUTOMATION_ADMIN_EMAIL` / `AUTOMATION_ADMIN_PASSWORD` (first admin, created only if no admin exists; the operator's password is
-exempt from the password policy), `AUTOMATION_RUN_TIMEOUT_HOURS` (12, read in `jobs.py`).
+Paths and web: `AUTOMATION_STORAGE_DIR`, `_AUTOMATIONS_DIR`, `_FRONTEND_DIR`, `_COOKIE_SECURE`, `_SESSION_HOURS`, `_ALLOWED_ORIGINS`, `_TRUST_PROXY`,
+`_MAX_FAILED_LOGINS`, `_LOCKOUT_MINUTES`, `_AUTO_APPROVE`. Capacity: `_MAX_CONCURRENT_RUNS` (2), `_MAX_TOTAL_WORKERS` (8), `_MAX_WORKERS` (4),
+`_MAX_ACTIVE_PER_USER` (5), `_RUN_TIMEOUT_HOURS` (12), `_MAX_UPLOAD_MB` (25). Retries: `_AUTO_RETRIES` (1), `_RETRY_BACKOFF_SECONDS` (60).
+Logs/retention: `_ENGINE_LOG` (`redacted`|`off`), `_LOG_MAX_MB` (20), `_RETENTION_FILES_DAYS` (30), `_RETENTION_ROWS_DAYS` (180); 0 keeps forever.
+Browser: `_BROWSER_CHANNEL` (msedge), `_HEADLESS` (false), `_PYTHON`. First admin: `_ADMIN_EMAIL`, `_ADMIN_PASSWORD` (operator's password is exempt from the policy).
 
 Start: `cd backend && python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000` (or `start.sh` / `start.bat`).
-`create_app` is a factory; there is deliberately no module-level `app`.
+Check a server: `python -m app.cli preflight`; real sign-in test: `python -m app.cli check-login <slug>`.
 
 ## 11. Frontend conventions
 
-- Plain ES modules, no build tools. `static/app.js` exports `h()` (DOM builder), `api()`, `shell()` (top bar + page frame),
-  `runPanel()` (progress UI shared by the run page and History), `stopRun()`, `pill()`, formatting helpers.
-- **No `innerHTML` with data and no inline scripts/styles.** Values go through `textContent`; the CSP is
-  `default-src 'self'` (+ `img-src data:`), so styles are classes and dynamic sizes use `el.style.x = ...` (CSSOM is allowed).
-- One page = one HTML stub + one JS file (`login`, `signup`, `dashboard`, `automation`, `runs`, `account`, `admin`).
-- Design: light theme only, flat surfaces, system fonts, a single shared side gutter (`--gutter`, `--max`) for top bar and page,
-  no decorative dots/icons. Colors are CSS variables at the top of `styles.css`.
+Plain ES modules, no build. **No `innerHTML` with data and no inline scripts/styles** (CSP `default-src 'self'`); values go through `textContent`; dynamic
+sizes use `el.style.x = ...`. One page = one HTML stub + one JS file. Light theme only, flat surfaces, system fonts, one shared side gutter for top bar and page,
+no decorative dots or icons. The run panel polls `GET /api/runs/{id}` every 2 s while a run is open, so a refresh or reconnect always shows database state.
 
 ## 12. Invariants (do not break these)
 
-1. **Never edit engine files for dashboard reasons.** Adapt in `runner.py` or `manifest.json`.
-2. **Never import an engine into the web server process.** Only `runner.py` imports engines.
-3. One active run per automation at a time (shared Office Ally login). Enforced by the per-slug worker thread.
-4. A user must never reach another user's run, sheet or result: use `_get_run` / `allowed_automation`, return 404.
-5. Never trust client-supplied paths: resolve filenames inside the user's `data_dir` (`safe_filename` + parent check).
-6. Never store passwords or session tokens in readable form; only hashes.
-7. Every security-relevant action writes `activity_logs` (and sign-ins write `login_events`) via `services/audit.py`.
-8. The login path must take similar time and give identical messages for unknown email vs wrong password.
-9. Keep at least one active admin (role/disable endpoints enforce it).
-10. Append-only migrations.
+1. Never edit engine files for dashboard reasons; adapt in `runner.py` or `manifest.json`.
+2. Never import an engine into the web server process; only `runner.py` does.
+3. Runs of one automation never overlap unless its manifest allows it (`max_concurrent_runs`, default 1) after the session safety was verified.
+4. Every run uses only its own folder; shared mutable state is limited to the resume store (keyed by content) and the database.
+5. A run is `completed` only after `verify_output` passes. A retry never allows duplicates and always resumes.
+6. A user must never reach another user's run, sheet, result, log or events: use `_get_run` / `allowed_automation` and return 404; derive file paths on the server.
+7. No readable user passwords or session tokens; the Office Ally password is write-only (never returned, logged or audited) and lives only in the engine's `.env`.
+8. Logs pass through `redact`; engine output can be switched off.
+9. Every security-relevant action writes `activity_logs`; sign-ins write `login_events`; run history goes to `run_events`.
+10. Append-only migrations; table rebuilds go in `FK_OFF_MIGRATIONS`.
+11. Keep at least one active admin.
 
 ## 13. How to extend
 
-**Add an automation.** Create `automations/<slug>/` containing the engine (satisfying section 4), its `.env`, and a `manifest.json`
-(keys: `slug` = folder name, `name`, `description`, `accent`, `insurance_id_label`, `required_fields` {key: label},
-`input_fields` / `output_fields` as `[key, label, required]`). Restart. It appears as a card; grant access in Admin > Users.
-Test it with `describe` and `validate` before a real run.
-
-**Add an endpoint.** Put it in the matching router, depend on `require_user`/`require_admin`, use `ctx.db.session()` or
-`.transaction()`, write an audit row for state changes, add a test.
-
-**Change the schema.** Append a script to `MIGRATIONS`; never modify earlier ones.
-
-**Add a page.** HTML stub in `frontend/`, JS in `frontend/static/`, route entry in `PAGES` in `main.py` with its audience
-(`anonymous`, `user`, `admin`).
+**Add an automation:** folder `automations/<slug>/` with the engine (section 4), its `.env`, and `manifest.json` (`slug`, `name`, `description`, `accent`,
+`insurance_id_label`, `required_fields`, `input_fields`/`output_fields` as `[key, label, required]`; optional `max_concurrent_runs`, `credential_fields`).
+Restart; grant access in Admin > Users. Run `preflight` and `check-login` before a real run. **Add an endpoint:** router + `require_user`/`require_admin` + audit row + test.
+**Change the schema:** append to `MIGRATIONS`. **Add a page:** HTML stub + JS file + `PAGES` entry in `main.py`.
 
 ## 14. Testing
 
-`cd backend && python -m pytest tests -q` (about 35 seconds). `conftest.py` builds an app per test over a temp storage dir and a
-copy of `tests/fake_automations/`. The **fake engine** implements the real contract and reacts to patient names:
-`SLOW` sleeps 60 s (for cancel/queue tests), `CRASH` raises, `DUP` reports a duplicate, `MISS` reports Not Created.
-Tests spawn real runner subprocesses, so they exercise the actual protocol. They cover auth, approval, lockout, CSRF, session
-expiry/revocation, role checks, per-user isolation, queue serialisation, cancel, crash handling, restart recovery, uploads,
-column validation, activity and login logging, and the `.env` loader/bootstrap admin.
-Browser checks were done by driving the real UI with Playwright against a throwaway server using the fake engine
-(never against the real engines, which would open Office Ally).
+`cd backend && python -m pytest tests -q` (about two minutes; tests spawn real runner subprocesses). The fake engine implements the real contract and reacts to
+patient-name tokens: `SLOW` sleeps, `CRASH` raises, `DUP` duplicate, `MISS` Not Created, `NOLOGIN` login fails, `KILLME` dies without a verdict once,
+`SPAWN` starts a child process (stands in for a browser), `LEAK` prints secrets, `BADOUT` writes a mismatching result sheet.
 
-## 15. Known gaps and gotchas
+Covered: auth/lockout/CSRF/sessions, approval and roles, user isolation (runs, files, events, retry, cancel), the state machine, output verification, failure
+classification, automatic and manual retry (resume, no duplicates), the fair queue, global run and worker caps, one-run-per-automation, concurrent automations,
+crash isolation, process cleanup on cancel, restart recovery, per-run folders and deleted sessions, content-keyed resume, structured and redacted logs,
+file listing / failed-record CSV / whitelisted downloads, retention, Office Ally login updates (permissions, write-only password, block during runs, audit without values),
+migration 2 on a version-1 database, process tracking, redaction, fingerprinting. **Browser checks** drive the real UI with Playwright against a throwaway server
+using the fake engine (never the real engines).
 
-- Not yet deployed or run against real Office Ally through the dashboard. Headless mode on Linux is unverified (the engines use
-  `no_viewport=True`, so window size may differ).
-- No notifications, no email password reset, no automatic cleanup of old sheets/results/logs.
-- Uploaded sheets, outputs, `run_rows` and run logs contain patient data.
-- `Settings()` created directly (as in tests) does not read `backend/.env`; only `get_settings()` does.
-- On macOS the project folder `automation/` was renamed to `app/`; the Python package inside is also called `app` (`backend/app`).
-- The engines' own tests (`automations/*/tests/`) are the originals and are not part of the dashboard test suite.
-- Office Ally credentials are one set per automation, readable by the service account; treat the server accordingly.
+**What the automated tests cannot prove:** Office Ally login and processing from the target server, headless behaviour on Linux, and real browser
+memory use. Those are the manual checks in `deploy/README.md` Part 3.
+
+## 15. Known gaps and limits
+
+- Not yet validated on a real server or against real Office Ally (Part 3 of the deploy guide).
+- Headless Linux is unverified (the engines use `no_viewport=True`, so window size may differ).
+- Engine output can contain patient names (it is redacted for secrets only); set `AUTOMATION_ENGINE_LOG=off` to store none. It is visible only to the run's owner and admins and is purged with the run's files.
+- If the whole server is killed without a clean stop, orphaned browsers are ended by systemd's control-group stop (not by the dashboard itself).
+- Non ACO no longer reuses a saved Office Ally session between runs (each run signs in fresh in its own folder, as ACO always did).
+- Changing a sheet's content starts it from scratch (by design); the engine's own duplicate check against Office Ally still prevents double visits.
+- No notifications; no email password reset; one server, one database file.

@@ -42,6 +42,12 @@ def _set_access(conn, user_id: int, slugs, granted_by: int, credential_slugs=())
                      " VALUES (?,?,?,?,?)", (user_id, slug, utcnow(), granted_by, 1 if slug in allowed else 0))
 
 
+def _check_login_rights(slugs, credentials):
+    stray = [c for c in credentials if c not in slugs]
+    if stray:
+        raise HTTPException(400, "The login can only be updated for automations the person can use.")
+
+
 def _check_slugs(ctx: Context, slugs):
     unknown = [s for s in slugs if ctx.registry.get(s) is None]
     if unknown:
@@ -145,6 +151,7 @@ def approve(user_id: int, body: ApproveBody, request: Request,
     slugs = body.automations if body.automations is not None else ctx.registry.slugs()
     _check_slugs(ctx, slugs)
     _check_slugs(ctx, body.credentials)
+    _check_login_rights(slugs, body.credentials)
     with ctx.db.transaction() as conn:
         user = _get_user(conn, user_id)
         conn.execute("UPDATE users SET status='active', approved_at=?, approved_by=?, failed_attempts=0,"
@@ -193,6 +200,7 @@ def set_access(user_id: int, body: AccessBody, request: Request,
                admin=Depends(require_admin), ctx: Context = Depends(get_ctx)):
     _check_slugs(ctx, body.automations)
     _check_slugs(ctx, body.credentials)
+    _check_login_rights(body.automations, body.credentials)
     with ctx.db.transaction() as conn:
         user = _get_user(conn, user_id)
         _set_access(conn, user_id, body.automations, admin["id"], body.credentials)

@@ -1,5 +1,6 @@
 # Linux: /etc/systemd/system/automation.service
-# Needs a screen-less browser: set AUTOMATION_BROWSER_CHANNEL=chromium and AUTOMATION_HEADLESS=true in the env file.
+# Needs a screen-less browser: AUTOMATION_BROWSER_CHANNEL=chromium and AUTOMATION_HEADLESS=true in backend/.env
+# (or run under xvfb-run if a visible window is needed). Run `python -m app.cli preflight` first.
 [Unit]
 Description=Automation dashboard
 After=network.target
@@ -7,12 +8,26 @@ After=network.target
 [Service]
 User=automation
 WorkingDirectory=/opt/automation/app/backend
+Environment=HOME=/opt/automation
 EnvironmentFile=/opt/automation/app/backend/.env
 ExecStart=/opt/automation/venv/bin/python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
-# Stopping the service also stops any browsers a run started.
+
+# A stopped service also stops every runner and browser it started.
 KillMode=control-group
+TimeoutStopSec=30
+
+# Files created by the service are private to it (patient data, saved sessions).
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits: a runaway browser cannot take the whole server down. Adjust to the machine.
+MemoryHigh=10G
+MemoryMax=12G
+TasksMax=4096
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target

@@ -117,6 +117,8 @@ def run_detail(run_id: int, user=Depends(require_user), ctx: Context = Depends(g
         has_open_same_sheet = conn.execute(
             "SELECT 1 FROM runs WHERE user_id=? AND automation_slug=? AND sheet_name=? AND status IN ('queued','validating','running') LIMIT 1",
             (run["user_id"], run["automation_slug"], run["sheet_name"])).fetchone()
+    options = json.loads(run["options"])
+    out["config"] = {k: options.get(k) for k in ("save", "workers", "limit", "only", "allow_duplicate", "no_resume", "column_map")}
     out["rows"] = [dict(r) for r in row_items]
     out["chain"] = chain
     out["can_cancel"] = run["status"] in OPEN_STATES

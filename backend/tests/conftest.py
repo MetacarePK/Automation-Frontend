@@ -20,6 +20,17 @@ PASSWORD = "Str0ngPassw0rd"
 
 
 @pytest.fixture
+def isolated_env(monkeypatch):
+    """A private copy of os.environ for tests that load .env files, so settings they load never leak into later tests."""
+    import os
+    private = dict(os.environ)
+    for key in [k for k in private if k.startswith("AUTOMATION_")]:
+        del private[key]
+    monkeypatch.setattr(os, "environ", private)
+    return private
+
+
+@pytest.fixture
 def settings(tmp_path):
     automations = tmp_path / "automations"
     shutil.copytree(FAKES, automations)

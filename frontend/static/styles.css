@@ -95,6 +95,8 @@ input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--go); }
 .check { display: flex; align-items: center; gap: 9px; font-weight: 500; cursor: pointer; }
 .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .form-error { color: var(--stop); background: var(--stop-soft); border-radius: var(--radius); padding: 9px 12px; font-size: 14px; }
+.form-warn { color: var(--warn-ink); background: var(--warn-soft); border-radius: var(--radius); padding: 9px 12px; font-size: 14px; }
+.form-info { color: var(--link); background: var(--info-soft); border-radius: var(--radius); padding: 9px 12px; font-size: 14px; }
 .form-ok { color: var(--go); background: var(--go-soft); border-radius: var(--radius); padding: 9px 12px; font-size: 14px; }
 .hint { color: var(--muted); font-size: 13px; }
 
@@ -218,3 +220,26 @@ dialog form .dialog-actions { padding: 0; border: 0; }
 
 .toast { position: fixed; bottom: 22px; right: 22px; background: var(--ink); color: #fff; padding: 11px 18px; border-radius: var(--radius); z-index: 50; max-width: 360px; }
 .toast.error { background: var(--stop); }
+
+/* run panel additions */
+.run-chain { margin: 0 22px 12px; font-size: 14px; }
+.run-views { padding: 0 22px 12px; }
+.seg { display: inline-flex; gap: 0; }
+.seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: var(--radius) 0 0 var(--radius); margin-left: 0; }
+.seg button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+.counts .c-pending b { color: var(--ink-2); }
+ol.events { list-style: none; margin: 0; padding: 12px 22px; border-top: 1px solid var(--line); max-height: 280px; overflow: auto; display: grid; gap: 6px; font-size: 14px; }
+ol.events li { display: flex; gap: 14px; }
+ol.events li span:first-child { color: var(--muted); min-width: 110px; }
+ol.events li.error span:last-child { color: var(--stop); }
+ol.events li.warn span:last-child { color: var(--warn-ink); }
+.run-foot .row { margin-left: auto; }
+.cred-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 22px; max-width: 640px; }
+.cred-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.check-sub { margin-left: 26px; font-size: 14px; color: var(--ink-2); }
+.section-gap { height: 22px; }
+.counts .c-carried b { color: var(--ink-2); }
+dl.config { margin: 0; padding: 14px 22px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 200px 1fr; gap: 6px 16px; font-size: 14px; }
+dl.config dt { color: var(--muted); } dl.config dd { margin: 0; overflow-wrap: anywhere; }

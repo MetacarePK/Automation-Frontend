@@ -29,15 +29,16 @@ Anyone else uses **Request an account**; the request waits in Admin > Users unti
 
 ## How a run works
 
-1. Upload: the sheet is saved in that user's own workspace (`storage/workspaces/<automation>/user-<id>/`).
-2. Start: the server checks the sheet with the engine's own reader, then queues the run.
-3. One run at a time **per automation** (each uses one Office Ally login; two windows on one login can hang).
-   ACO and Non ACO run side by side. Others wait in the queue and start by themselves.
-4. Each run is its own process (`backend/runner/runner.py`) that points the engine at that user's folders,
-   applies the browser settings from the environment, and reports each row back. The page polls the database,
-   so a refresh, a second tab, or a server restart loses nothing.
-5. Stopping a run kills the runner and every browser it started.
-6. Re-running the same sheet name resumes: rows already Done are skipped, exactly as on the PC.
+1. Upload: the sheet is staged in that user's own area; starting a run copies it into the run's private folder (`storage/runs/<id>/`).
+2. The server checks the sheet with the engine's own reader and queues the run (state `queued`).
+3. A scheduler starts it when there is room: global caps on runs and browser windows, one run per automation at a time (one Office Ally
+   login each), and a fair order between people. ACO and Non ACO run side by side.
+4. `validating` (sheet and login re-checked) then `running`: a separate process (`backend/runner/runner.py`) runs the unchanged engine against
+   the run's own folders and reports each row; the page polls the database, so refreshes, reconnects and restarts lose nothing.
+5. When the process ends every browser it started is cleaned up, the result sheet is read back and compared with the database, and only then the
+   run becomes `completed` / `completed_with_errors` (otherwise `failed`, with the reason). Stop gives `cancelled`; a server restart gives `interrupted`.
+6. Retry (manual, or one automatic retry after a crash) skips rows already Done and never allows duplicates.
+7. Old files and patient row details are removed by the retention policy.
 
 ## What is logged
 
@@ -68,9 +69,9 @@ Anyone else uses **Request an account**; the request waits in Admin > Users unti
 ## Tests
 
 ```
-cd backend && python -m pytest tests -q        # 38 tests: auth, approval, isolation, queue, cancel, crash, restart
+cd backend && python -m pytest tests -q        # auth, approval, isolation, states, verification, retry, scheduling, cleanup, retention, logins
 ```
 
 ## Putting it on the server
 
-See `deploy/README.md`.
+See `deploy/README.md` (install, `preflight`, `check-login`, and the checks to run with the real portal).

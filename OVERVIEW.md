@@ -64,7 +64,7 @@ More automations can be added later. Each one is just a folder with its program 
 
 | Role | Can do |
 |---|---|
-| **User** | Sign in, see only the automations the admin gave them, upload sheets, start and stop their own runs, see their own history and activity, change their password |
+| **User** | Sign in, see only the automations the admin gave them, upload sheets, start, stop and retry their own runs, see their own history, files and activity, change their password. An admin can also allow a person to **update an automation's Office Ally login** (username and password, for sometimes they change); admins always can |
 | **Admin** | Everything a user can, plus: approve or disable accounts, choose which automations each person can use, reset passwords, unlock accounts, make other admins, see every run and stop anyone's run, see sign-in monitoring and the full activity log, end sessions |
 
 ### Getting an account
@@ -89,40 +89,55 @@ A **run** is one pass of an automation over one billing sheet.
 
 1. **Start.** On the dashboard the person clicks **Start** on a card.
 2. **Choose a sheet.** They pick an `.xlsx` file. It uploads immediately.
-3. **Columns.** The dashboard matches the sheet's column names to what the automation needs (Patient, Birthdate, CPT,
-   and so on). If the layout was used before, the match is remembered. When all required columns are matched it
-   shows "Columns matched" and stays out of the way; otherwise it opens so the person can pick the missing ones.
-4. **Options.** "Save to Office Ally" (on by default) and "Windows" (how many browser windows work at once, default 4,
-   maximum 4). Under "More options": only the first N rows, only names containing some text, allow duplicates,
-   start over and ignore earlier progress.
-5. **Start run.** A confirmation asks if visits really should be created. The dashboard first reads the sheet with the
-   automation's own reader to check it is valid, then queues the run.
-6. **Queue.** Only one run per automation goes at a time, because each automation uses one Office Ally login and two
-   windows on one login can hang. If another run is going, the new one shows "Waiting" and starts by itself.
-   ACO and Non ACO can run at the same time.
-7. **Progress.** The page updates every two seconds: a colored bar, counts (Created, Duplicate, Not created, Rows), and
-   a table of the latest rows. "All rows" shows everything; "Log" shows the run's log.
-8. **Stop.** **Stop** is on the run page and on the dashboard card. It stops the run and closes its browsers. Visits
-   already saved stay saved.
-9. **Finish and download.** When the run ends, **Download sheet** gives a copy of the sheet with the results filled in.
+3. **Columns.** The dashboard matches the sheet's column names to what the automation needs. A layout used before is remembered.
+   When all required columns are matched it shows "Columns matched"; otherwise it opens so the person can pick the missing ones.
+4. **Options.** "Save to Office Ally" (on by default) and "Windows" (browser windows working at once, default 4, maximum 4).
+   Under "More options": only the first N rows, only names containing some text, allow duplicates, start over.
+5. **Start.** A confirmation asks if visits really should be created. The dashboard reads the sheet with the automation's own
+   reader first, so an invalid file is refused with a clear message before anything is queued. The same sheet cannot be started
+   twice at once.
+6. **The run gets its own private folder** (its own copy of the sheet, its own output, its own log). Nothing is shared with other runs.
+7. **Waiting.** A run starts when the server has room (see section 9). Until then it shows **Waiting**.
+8. **Checking.** Just before starting, the server checks the sheet again and that the automation has a login saved.
+9. **Running.** The page updates every two seconds: counts (Successful, Skipped, Failed, Pending), a colored bar, and a table of the rows.
+   Filters show only Failed, Skipped or Successful rows. "Log" shows the run's log, "History" shows what happened to the run (queued, checking,
+   started, retried, stopped...), "Settings" shows the options it was started with.
+10. **Stop.** **Stop** (on the run page and on the dashboard card) ends the run and closes its browsers. Visits already saved stay saved.
+11. **Finish.** The run ends in one of these states:
 
-Closing the browser tab does not affect a run. It lives on the server. Reopening the card shows it again.
+| State | Meaning |
+|---|---|
+| **Completed** | Every row was processed and the result sheet was read back and matches what the dashboard recorded |
+| **Completed with errors** | It finished, but some rows failed (or reported nothing). Review them and retry |
+| **Failed** | It stopped with a problem. The reason is shown (wrong login, invalid sheet, crash, result could not be verified...) |
+| **Interrupted** | The server stopped while it was running. Retry it |
+| **Stopped** | Someone pressed Stop |
 
-### If the same sheet is run again
+A run is only called **Completed** after its result sheet has been checked against the database. If they disagree it is marked **Failed**.
 
-The automation remembers progress in its result file. Rows already **Done** are skipped, so a run that was stopped or
-failed halfway continues where it left off. "Start over" turns that off.
+12. **Review and download.** "Failed records (CSV)" lists every failed row with its reason. "Result sheet" is a copy of the sheet with
+    Status, Visit ID, insurance ID and charges filled in.
+
+Closing the browser tab does not affect a run. It lives on the server; reopening the card shows it again.
+
+### Retry
+
+**Retry** (on the run page) runs the same sheet again. It is built to be safe: rows that are already done are **not processed again**
+(the run shows "Done earlier"), duplicates are never allowed, and the engine still checks Office Ally for an existing visit first.
+Only failed, stopped, interrupted, or completed-with-errors runs can be retried. A run that **crashes** (browser or process died) is
+retried once automatically after a short wait; a wrong login or an invalid sheet is never retried automatically, because it would only fail again.
+A changed sheet starts from scratch (progress is tied to the sheet's exact contents).
 
 ### Row results
 
 | Result | Meaning |
 |---|---|
-| **Done / Created** | The visit was created and saved |
-| **Duplicate** | A visit for that patient already existed, so nothing new was created. The existing visit's ID is recorded |
-| **Not created** | Patient not found, bad data, or Office Ally problem. The reason is shown in Note |
+| **Successful** | The visit was created and saved |
+| **Skipped** | A visit for that patient already existed, so nothing new was created. The existing visit's ID is recorded |
+| **Failed** | Patient not found, bad data, or an Office Ally problem. The reason is in Note |
+| **Pending** | Not processed yet |
 
-Rows that end as Not created are retried once automatically at the end of the run, one window at a time, because
-many failures are temporary (slow popup, dropped connection).
+Failed rows are retried once automatically at the end of a run (many failures are temporary, such as a slow popup).
 
 ---
 
@@ -156,49 +171,53 @@ Everything lives in one folder, `storage/`, plus two kinds of settings files.
 
 | Table | What it holds |
 |---|---|
-| `users` | Name, email, password **hash** (never the password), role (admin/user), status (pending/active/disabled), failed-sign-in count and lock time, created/approved dates, last sign-in |
-| `sessions` | One row per signed-in browser: a **hash** of the session token, who, when it started, last seen, when it expires, IP address, browser name, whether it was ended |
-| `user_automations` | Which person may use which automation, who granted it and when |
-| `login_events` | Every sign-in attempt, successful or not: email, result, reason (wrong password, unknown email, pending, disabled, locked), IP, browser, time |
-| `activity_logs` | The audit trail: who did what, to what, from which IP, when (sign-ups, approvals, role and access changes, uploads, runs started/finished/stopped, downloads, password changes) |
-| `runs` | One row per run: automation, who started it, status, sheet name and location, the options chosen (column match, save on/off, windows...), total rows, summary or error, times, result file location |
-| `run_rows` | One row per sheet row per run: patient name, date of service, status, Visit ID, insurance ID, duplicate marker, error, line charges, note |
-| `column_mappings` | The remembered column match for each sheet layout, per automation |
+| `users` | Name, email, password **hash** (never the password), role, status (pending/active/disabled), failed-sign-in count and lock time, dates |
+| `sessions` | One row per signed-in browser: a **hash** of the session token, who, times, IP address, browser name, whether it was ended |
+| `user_automations` | Which person may use which automation, and whether they may also update that automation's Office Ally login |
+| `login_events` | Every sign-in attempt, successful or not, with reason, IP and browser |
+| `activity_logs` | The audit trail: who did what, to what, from which IP (sign-ups, approvals, access changes, uploads, runs, retries, downloads, login updates and tests). Login **values** are never recorded |
+| `runs` | One row per run: automation, who started it, state, sheet name, the run's private copy of the sheet, the options chosen, total rows, rows carried over from earlier runs, summary, error and failure kind, times, retry link and attempt number, result file location |
+| `run_events` | A timeline per run: queued, checking, started, retry queued, stop requested, finished, with details such as the exit code and the last lines of output |
+| `run_rows` | One row per sheet row per run: patient name, date of service, status, Visit ID, insurance ID, skipped marker, error, line charges, note |
+| `column_mappings` | The remembered column match per sheet layout and automation |
 | `schema_version` | Which database version is installed, so updates upgrade it safely |
 
 ### 6.2 Files on disk (`storage/`)
 
 | Location | What it holds |
 |---|---|
-| `workspaces/<automation>/user-<id>/data/` | Sheets that person uploaded, exactly as uploaded |
-| `workspaces/<automation>/user-<id>/output/` | The automation's result files: the sheet with Status/Visit ID/insurance ID/charges filled in, plus results and visits CSV files and the engine's own log |
-| `workspaces/<automation>/auth_state.json` | The saved Office Ally browser session (cookies) for that automation |
-| `runs/<run id>/run.log` | The log of that run, shown under "Log" |
-| `runs/<run id>/job.json` | The instructions given to the runner for that run (paths, column match, options). No passwords |
+| `runs/<run id>/input/` | The run's own copy of the uploaded sheet |
+| `runs/<run id>/output/` | The automation's result files: the result sheet, results and visits CSVs, its own log |
+| `runs/<run id>/run.log` | The run's log: timestamped lines, secrets hidden, size-capped |
+| `runs/<run id>/auth_state.json` | The saved Office Ally browser session (cookies) **while the run is going; deleted when it ends** |
+| `workspaces/<automation>/user-<id>/uploads/` | Sheets a person has uploaded and not yet started |
+| `workspaces/<automation>/user-<id>/resume/` | A copy of the latest result sheet per exact sheet, so a retry skips finished rows |
 
-Each person's sheets and results are in their own folder. Other users cannot open them through the site.
-
-### 6.3 Settings and secrets (outside `storage/`)
+### 6.3 Settings and secrets
 
 | File | What it holds |
 |---|---|
-| `automations/<automation>/.env` | The **Office Ally username and password** for that automation. Shared by everyone who runs it; they are never shown on screen |
-| `backend/.env` | Server settings (see section 10), including the first admin's email and password for first start |
+| `automations/<automation>/.env` | The **Office Ally username and password** for that automation. Updated from the dashboard by admins or people an admin allowed; the password is never shown again |
+| `backend/.env` | Server settings (section 10), including the first admin's email and password for first start |
 
-Both are excluded from version control (`.gitignore`) and should be readable only by the account that runs the service.
+Both are excluded from version control and should be readable only by the account that runs the service.
 
 ### 6.4 What is deliberately not stored
 
-- User passwords in readable form (only a bcrypt hash).
-- Session tokens in readable form (only a hash, so a copy of the database cannot be used to sign in).
-- Office Ally passwords in the database.
-- Browser screenshots or recordings.
+User passwords in readable form (only a bcrypt hash), session tokens in readable form (only a hash), Office Ally passwords in the database or in
+logs, browser screenshots or recordings.
 
-### 6.5 Be aware
+### 6.5 Patient information and retention
 
-- Uploaded sheets, result sheets, `run_rows`, and run logs contain **patient information** (names, dates of birth,
-  insurance IDs, diagnosis codes). Protect `storage/` accordingly and back up `storage/automation.db`.
-- **Nothing is deleted automatically.** Sheets, results and logs stay until someone removes them.
+Sheets, result sheets, `run_rows` and run logs contain **patient information** (names, dates of birth, insurance IDs, diagnosis codes).
+Only the person who started a run, and admins, can see them. They are removed automatically:
+
+- a run's files (sheet copy, outputs, log) are deleted **30 days** after the run finished;
+- per-row details (patient name, date of service, IDs) are deleted **180 days** after;
+- the run itself (who, when, counts, state) and the audit trail are kept.
+
+Both periods are settings (`0` keeps everything). Engine output in logs can contain patient names; set `AUTOMATION_ENGINE_LOG=off` to store none.
+Back up `storage/automation.db`.
 
 ---
 
@@ -235,6 +254,8 @@ Both are excluded from version control (`.gitignore`) and should be readable onl
   written outside the person's own folder.
 - **Safe display:** patient names and every other value from a sheet are shown as plain text, so a sheet cannot inject
   code into a page.
+- **Office Ally login:** the password can be written but never read back through the dashboard or logs; the audit trail records that it changed, never the value. Only admins and people an admin allowed can change it, and not during a run.
+- **Logs:** secrets (passwords, cookies, tokens) are removed from run logs before they are stored.
 - **Last admin:** the system refuses to disable or demote the only remaining admin, and admins cannot disable themselves.
 
 Passwords for Office Ally are protected only by file permissions on the server, because the automations need to read
@@ -246,16 +267,18 @@ them. Treat the server and the `.env` files accordingly.
 
 | Rule | Value |
 |---|---|
-| Runs per automation at a time | 1 (others wait in a queue and start automatically) |
-| ACO and Non ACO at the same time | Yes |
-| Browser windows per run | Up to 4 (server setting) |
+| Runs of the **same automation** at once | 1 (each automation uses one Office Ally login and two windows on one login can hang). Others wait |
+| Different automations at once | Yes (Blackhill ACO and Non ACO run side by side) |
+| Runs at the same time, whole server | 2 (setting) |
+| Browser windows at the same time, whole server | 8 (setting); 4 per run |
+| Order when runs are waiting | Fair: the person with the fewest running jobs goes first, then the person who started one least recently, then the oldest. A waiting run never blocks a different automation |
 | Active or waiting runs per person | 5 |
 | Maximum upload | 25 MB, `.xlsx` only |
 | Longest run | 12 hours, then it is stopped and marked failed |
-| Session length | 12 hours, extended while in use |
-| Account lock | 5 wrong passwords, 15 minutes |
-| If the server restarts | Waiting runs resume; a run that was in progress is marked failed ("server restarted"). Run the same sheet again and finished rows are skipped |
-| If a run crashes | Only that run fails. The website and other runs are not affected |
+| Automatic retry | Only after a crash, once, after about a minute (waits longer each time); never after a login or input error |
+| If the server restarts | Waiting runs resume; a run that was in progress is marked **Interrupted**. Retry it: finished rows are skipped |
+| If a run crashes | Only that run is affected. The website and other runs carry on, and its browsers are cleaned up |
+| Login update | Not possible while that automation has an active run |
 
 ---
 
@@ -267,7 +290,7 @@ them. Treat the server and the `.env` files accordingly.
 **Operating system:** Windows is the closest to the PC the automations were built on (visible Edge window).
 Linux works too, with a headless browser, but behaves slightly differently and needs a small real test first.
 
-**Settings file `backend/.env`** (real environment variables override it):
+**Settings file `backend/.env`** (real environment variables override it; the full list with defaults is in `backend/.env.example`):
 
 | Setting | Meaning |
 |---|---|
@@ -277,7 +300,10 @@ Linux works too, with a headless browser, but behaves slightly differently and n
 | `AUTOMATION_ALLOWED_ORIGINS` | Your domain, for example `https://automation.example.com` |
 | `AUTOMATION_BROWSER_CHANNEL` | `msedge` (Windows) or `chromium` (Linux) |
 | `AUTOMATION_HEADLESS` | `false` on Windows, `true` on Linux |
-| `AUTOMATION_MAX_WORKERS` | Most browser windows per run (default 4) |
+| `AUTOMATION_MAX_CONCURRENT_RUNS`, `AUTOMATION_MAX_TOTAL_WORKERS`, `AUTOMATION_MAX_WORKERS` | How many runs and browser windows the server may use at once (defaults 2, 8, 4) |
+| `AUTOMATION_AUTO_RETRIES`, `AUTOMATION_RETRY_BACKOFF_SECONDS` | Automatic retry after a crash (default 1 retry after 60 s) |
+| `AUTOMATION_RETENTION_FILES_DAYS`, `AUTOMATION_RETENTION_ROWS_DAYS` | When old files and patient row details are deleted (30 and 180 days; 0 keeps them) |
+| `AUTOMATION_ENGINE_LOG` | `redacted` (default) or `off` to store no engine output |
 | `AUTOMATION_SESSION_HOURS` | Sign-in length (default 12) |
 
 **Start:** `start.bat` (Windows) or `./start.sh` (Linux/Mac). The site listens on `127.0.0.1:8000` only; put **Caddy**
@@ -290,16 +316,14 @@ Step-by-step instructions for Windows and Linux are in `deploy/README.md`.
 
 ## 11. What is not done yet
 
-- It has **not been deployed** to a real server, and a real Office Ally run through the dashboard has **not been
-  tested** yet. Everything was tested with a stand-in automation and by checking that the real automations load and
-  read sheets correctly.
-- Running **headless** (no visible browser) on Linux is untested against Office Ally.
-- Only two of about nineteen automations have been moved. The rest stay as they are.
+- It has **not been validated on a real server with real Office Ally logins**. The automated tests use a stand-in automation, so they prove the
+  dashboard logic (states, queue, retry, cleanup, isolation, retention) but not that Office Ally works from your server. `deploy/README.md`,
+  Part 3, lists the exact checks to run: `python -m app.cli preflight`, `python -m app.cli check-login <automation>`, then a small approved sheet per automation.
+- Running **headless** on Linux is unverified against Office Ally.
+- Only two of about nineteen automations have been moved.
 - No email or message alerts when a run finishes or fails.
 - No password reset by email: an admin resets it and gives the new password in person.
-- No automatic cleanup of old sheets, results, or logs (see section 6.5).
-- Office Ally logins are one per automation, not one per person.
-- One database file on one server; there is no multi-server setup.
+- One database file on one server.
 
 ---
 
@@ -320,7 +344,10 @@ Step-by-step instructions for Windows and Linux are in `deploy/README.md`.
 | **Pending** | An account request waiting for admin approval |
 | **Session** | A signed-in browser. Ending it signs that browser out |
 | **Hash** | A one-way scrambled form of a password or token that can be checked but not reversed |
-| **Queue** | Runs of one automation waiting for the current one to finish |
+| **Queue** | Runs waiting for room on the server or for their automation's Office Ally login to be free |
+| **Retry** | Running the same sheet again; rows already done are skipped and duplicates are never allowed |
+| **Interrupted** | A run that was in progress when the server stopped |
+| **Retention** | Automatic deletion of old files and patient row details after a set number of days |
 | **Headless** | A browser running without a visible window |
 
 ---

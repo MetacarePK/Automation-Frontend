@@ -2,6 +2,7 @@ fastapi>=0.115,<1
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 openpyxl>=3.1
+psutil>=5.9
 bcrypt>=4.0,<5
 playwright>=1.45
 pytest>=8

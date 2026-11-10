@@ -107,15 +107,13 @@ def test_security_headers_present(client):
     assert r.headers["x-frame-options"] == "DENY" and "default-src 'self'" in r.headers["content-security-policy"]
 
 
-def test_env_file_is_loaded_and_real_environment_wins(tmp_path, monkeypatch):
+def test_env_file_is_loaded_and_real_environment_wins(tmp_path, isolated_env):
     from app.config import load_env_file
     f = tmp_path / ".env"
     f.write_text('# comment\nAUTOMATION_ADMIN_EMAIL=boss@example.com\nAUTOMATION_ADMIN_PASSWORD="quoted pass"\nAUTOMATION_HEADLESS=true\n')
-    monkeypatch.delenv("AUTOMATION_ADMIN_EMAIL", raising=False)
-    monkeypatch.delenv("AUTOMATION_ADMIN_PASSWORD", raising=False)
-    monkeypatch.setenv("AUTOMATION_HEADLESS", "false")
-    load_env_file(f)
     import os
+    os.environ["AUTOMATION_HEADLESS"] = "false"
+    load_env_file(f)
     assert os.environ["AUTOMATION_ADMIN_EMAIL"] == "boss@example.com"
     assert os.environ["AUTOMATION_ADMIN_PASSWORD"] == "quoted pass"
     assert os.environ["AUTOMATION_HEADLESS"] == "false"
@@ -132,3 +130,52 @@ def test_bootstrap_admin_works_with_the_operators_own_password_and_never_blocks_
     settings.storage_dir = settings.storage_dir.parent / "other"
     with TestClient(create_app(settings), base_url="http://testserver") as c:
         assert c.get("/healthz").status_code == 200
+
+
+def test_env_file_handles_comments_quotes_and_odd_values(tmp_path, isolated_env):
+    import os
+    from app.config import load_env_file, Settings
+    f = tmp_path / ".env"
+    f.write_text("\n".join([
+        "AUTOMATION_MAX_CONCURRENT_RUNS=3      # runs at the same time",
+        "AUTOMATION_ADMIN_EMAIL=boss@example.com   # the first admin",
+        'AUTOMATION_ADMIN_PASSWORD="pa ss#word # x"',        # quoted: the # belongs to the password
+        "AUTOMATION_ENGINE_LOG='off'",
+        "AUTOMATION_ALLOWED_ORIGINS=",                         # empty value
+        "AUTOMATION_RETENTION_FILES_DAYS=7",
+        "NOT_A_SETTING_LINE",
+    ]))
+    load_env_file(f)
+    s = Settings()
+    assert s.max_concurrent_runs == 3 and s.bootstrap_admin_email == "boss@example.com"
+    assert s.bootstrap_admin_password == "pa ss#word # x" and s.engine_log == "off" and s.retention_files_days == 7
+    assert s.allowed_origins == ()
+
+
+def test_the_shipped_env_example_loads_cleanly(isolated_env):
+    from pathlib import Path
+    from app.config import load_env_file, Settings
+    example = Path(__file__).resolve().parents[1] / ".env.example"
+    load_env_file(example)
+    s = Settings()                                             # would raise on any value that is not a clean number
+    assert s.max_concurrent_runs == 2 and s.max_total_workers == 8 and s.auto_retries == 1 and s.engine_log == "redacted"
+    assert s.retention_files_days == 30 and s.retention_rows_days == 180
+
+
+def test_a_bad_number_in_env_stops_startup_with_a_clear_message(isolated_env):
+    import os
+    import pytest
+    from app.config import Settings
+    os.environ["AUTOMATION_MAX_WORKERS"] = "four"
+    with pytest.raises(SystemExit) as err:
+        Settings()
+    assert "AUTOMATION_MAX_WORKERS" in str(err.value) and "whole number" in str(err.value)
+
+
+def test_shipped_env_files_have_no_inline_comments_because_systemd_and_start_bat_would_keep_them():
+    import re
+    from pathlib import Path
+    for name in (".env.example",):
+        for line in (Path(__file__).resolve().parents[1] / name).read_text().splitlines():
+            if line.startswith("AUTOMATION_"):
+                assert not re.search(r"\s#", line), f"{name}: inline comment would break systemd/start.bat: {line}"

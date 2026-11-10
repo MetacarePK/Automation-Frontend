@@ -129,7 +129,7 @@ function showRun(runId) {
   const box = h("div");
   progressSlot.append(box);
   newRunHeading.hidden = false;
-  panel = runPanel(box, runId, { insuranceLabel: automation.insurance_id_label });
+  panel = runPanel(box, runId, { insuranceLabel: automation.insurance_id_label, onOpenRun: showRun });
   progressSlot.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -139,4 +139,50 @@ if (wanted) showRun(parseInt(wanted, 10));
 else {
   const { runs } = await api(`/api/runs?automation=${encodeURIComponent(slug)}&limit=1`);
   if (runs.length && (runs[0].status === "running" || runs[0].status === "queued")) showRun(runs[0].id);
+}
+
+/* ---------- Office Ally login: for admins and people an admin allowed ---------- */
+if (automation.can_manage_credentials) {
+  const body = h("div", { class: "flow" });
+  const box = h("details", { class: "panel login-box" }, h("summary", { class: "panel-body", text: "Office Ally login" }), h("div", { class: "panel-body" }, body));
+  let loaded = false;
+
+  async function loadLogin() {
+    const status = await api(`/api/automations/${slug}/credentials`);
+    const inputs = {};
+    const grid = h("div", { class: "cred-grid" }, ...status.fields.map(f => {
+      const input = h("input", { type: f.secret ? "password" : "text", id: "cred-" + f.key, autocomplete: "off", spellcheck: "false",
+        placeholder: f.secret ? (f.is_set ? "Saved. Leave blank to keep it" : "Not set") : "" });
+      if (!f.secret) input.value = f.value || "";
+      inputs[f.key] = input;
+      return h("label", { class: "field", for: "cred-" + f.key }, f.label, input);
+    }));
+    const msg = h("div", { hidden: true });
+    const say = (ok, text) => { msg.hidden = false; msg.className = ok ? "form-ok" : "form-error"; msg.textContent = text; };
+    const saveBtn = h("button", { onclick: async () => {
+      msg.hidden = true;
+      const values = {};
+      for (const f of status.fields) {
+        const v = inputs[f.key].value;
+        if (f.secret ? v !== "" : v !== (f.value || "")) values[f.key] = v;
+      }
+      if (!Object.keys(values).length) { say(false, "Nothing to update."); return; }
+      saveBtn.disabled = true;
+      try { await api(`/api/automations/${slug}/credentials`, { method: "PUT", body: { values } }); toast("Login saved"); await loadLogin(); }
+      catch (err) { say(false, err.message); }
+      finally { saveBtn.disabled = false; }
+    } }, "Save");
+    const testBtn = h("button", { class: "secondary", onclick: async () => {
+      if (!confirm("Sign in to Office Ally with the saved login to check it? Nothing is changed there.")) return;
+      msg.hidden = true; testBtn.disabled = true; testBtn.textContent = "Testing...";
+      try { const r = await api(`/api/automations/${slug}/credentials/test`, { method: "POST" }); say(r.ok, r.message); }
+      catch (err) { say(false, err.message); }
+      finally { testBtn.disabled = false; testBtn.textContent = "Test login"; }
+    } }, "Test login");
+    if (status.busy) { saveBtn.disabled = testBtn.disabled = true; Object.values(inputs).forEach(i => { i.disabled = true; }); }
+    body.replaceChildren(grid, h("div", { class: "cred-actions" }, saveBtn, testBtn,
+      status.busy ? h("span", { class: "muted", text: "A run is in progress. Update the login after it finishes." }) : null), msg);
+  }
+  box.addEventListener("toggle", () => { if (box.open && !loaded) { loaded = true; loadLogin().catch(err => body.replaceChildren(h("div", { class: "form-error", text: err.message }))); } });
+  main.append(h("div", { class: "section-gap" }), box);
 }

@@ -350,3 +350,13 @@ def test_retention_never_touches_runs_that_are_still_open(make_client, settings,
         conn.execute("UPDATE runs SET finished_at='2020-01-01T00:00:00Z' WHERE id=?", (rid,))   # nonsense, but open
     assert purge(ctx)["run_files"] == 0
     c.post(f"/api/runs/{rid}/cancel"); wait_for(c, rid)
+
+
+def test_run_details_show_the_selected_configuration_and_no_secrets(make_client):
+    c = make_client("u@example.com")
+    run = wait_for(c, run_of(c, [("Ann", "1"), ("Bob", "2")], limit=1, only="Ann", workers=1))
+    config = run["config"]
+    assert config["save"] is True and config["workers"] == 1 and config["limit"] == 1 and config["only"] == "Ann"
+    assert config["column_map"]["name"] == "Patient"
+    text = json.dumps(run)
+    assert "Sup3rSecret" not in text and "sheet_sha256" not in text and "/runs/" not in run["sheet_name"]

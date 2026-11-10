@@ -25,7 +25,7 @@ function openRun(id, slug) {
   const box = h("div");
   dialog.replaceChildren(box, h("div", { class: "dialog-actions" }, h("button", { class: "secondary", onclick: () => dialog.close() }, "Close")));
   const automation = automations.find(a => a.slug === slug);
-  openPanel = runPanel(box, id, { insuranceLabel: (automation && automation.insurance_id_label) || "Insurance ID" });
+  openPanel = runPanel(box, id, { insuranceLabel: (automation && automation.insurance_id_label) || "Insurance ID", onOpenRun: (newId) => { openRun(newId, slug); load(); } });
   history.replaceState(null, "", `/runs?id=${id}`);
   if (!dialog.open) dialog.showModal();
 }
@@ -36,7 +36,7 @@ async function load() {
   if (autoFilter) qs.set("automation", autoFilter);
   if (userFilter) qs.set("user_id", userFilter);
   const { total, runs } = await api("/api/runs?" + qs);
-  const columns = ["Run", ...(isAdmin ? ["User"] : []), "Automation", "Sheet", "Rows", "Created", "Not created", "Status", "Started"];
+  const columns = ["Run", ...(isAdmin ? ["User"] : []), "Automation", "Sheet", "Rows", "Successful", "Failed", "Status", "Started"];
   listBox.replaceChildren(h("div", { class: "panel" },
     runs.length
       ? h("div", { class: "table-wrap" }, h("table", {},
@@ -53,7 +53,7 @@ async function load() {
 }
 
 const filters = h("div", { class: "filters" },
-  select("f-status", "Status", [["", "Any"], ["running", "Running"], ["queued", "Waiting"], ["succeeded", "Finished"], ["failed", "Failed"], ["cancelled", "Stopped"]], v => { statusFilter = v; offset = 0; load(); }),
+  select("f-status", "Status", [["", "Any"], ["running", "Running"], ["queued", "Waiting"], ["completed", "Completed"], ["completed_with_errors", "With errors"], ["failed", "Failed"], ["interrupted", "Interrupted"], ["cancelled", "Stopped"]], v => { statusFilter = v; offset = 0; load(); }),
   select("f-auto", "Automation", [["", "All"], ...Object.entries(names)], v => { autoFilter = v; offset = 0; load(); }),
   isAdmin ? select("f-user", "User", [["", "Everyone"], ...people.map(p => [String(p.id), `${p.name} (${p.email})`])], v => { userFilter = v; offset = 0; load(); }) : null);
 

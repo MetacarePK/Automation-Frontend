@@ -144,25 +144,33 @@ function dialogShell(title, content, actions) {
   return dlg;
 }
 
-function accessChecklist(user, all, preselect) {
-  const boxes = all.map(a => h("input", { type: "checkbox", id: "ac-" + a.slug, value: a.slug, checked: preselect.includes(a.slug) }));
-  const list = h("div", { class: "access-list" }, ...all.map((a, i) => h("label", { class: "check", for: "ac-" + a.slug }, boxes[i], a.name)));
-  return { list, chosen: () => boxes.filter(b => b.checked).map(b => b.value) };
+function accessChecklist(user, all, preselect, preselectCreds = []) {
+  const rows = all.map(a => {
+    const use = h("input", { type: "checkbox", id: "ac-" + a.slug, value: a.slug, checked: preselect.includes(a.slug) });
+    const login = h("input", { type: "checkbox", id: "cr-" + a.slug, value: a.slug, checked: preselectCreds.includes(a.slug) && preselect.includes(a.slug) });
+    const sync = () => { login.disabled = !use.checked; if (!use.checked) login.checked = false; };
+    use.addEventListener("change", sync); sync();
+    return { use, login, node: h("div", {}, h("label", { class: "check", for: "ac-" + a.slug }, use, a.name),
+      h("label", { class: "check check-sub", for: "cr-" + a.slug }, login, "Can update the Office Ally login")) };
+  });
+  return { list: h("div", { class: "access-list" }, ...rows.map(r => r.node)),
+    chosen: () => rows.filter(r => r.use.checked).map(r => r.use.value),
+    credentials: () => rows.filter(r => r.login.checked).map(r => r.login.value) };
 }
 
 async function approveDialog(person, all) {
   all = all || (await api("/api/admin/users")).all_automations;
-  const { list, chosen } = accessChecklist(person, all, all.map(a => a.slug));
+  const { list, chosen, credentials } = accessChecklist(person, all, all.map(a => a.slug));
   dialogShell(`Approve ${person.name}`, h("div", { class: "stack" }, h("p", { class: "muted", text: `${person.email} can sign in once approved. Choose which automations they may use.` }), list), (close) => [
     h("button", { type: "button", class: "secondary", onclick: close }, "Cancel"),
-    h("button", { type: "button", onclick: async () => { try { await api(`/api/admin/users/${person.id}/approve`, { method: "POST", body: { automations: chosen() } }); toast("Account approved"); close(); show(current); } catch (err) { toast(err.message, true); } } }, "Approve account")]);
+    h("button", { type: "button", onclick: async () => { try { await api(`/api/admin/users/${person.id}/approve`, { method: "POST", body: { automations: chosen(), credentials: credentials() } }); toast("Account approved"); close(); show(current); } catch (err) { toast(err.message, true); } } }, "Approve account")]);
 }
 
 function accessDialog(person, all) {
-  const { list, chosen } = accessChecklist(person, all, person.automations);
+  const { list, chosen, credentials } = accessChecklist(person, all, person.automations, person.credential_automations || []);
   dialogShell(`Automation access for ${person.name}`, list, (close) => [
     h("button", { type: "button", class: "secondary", onclick: close }, "Cancel"),
-    h("button", { type: "button", onclick: async () => { try { await api(`/api/admin/users/${person.id}/access`, { method: "PUT", body: { automations: chosen() } }); toast("Access saved"); close(); show("users"); } catch (err) { toast(err.message, true); } } }, "Save access")]);
+    h("button", { type: "button", onclick: async () => { try { await api(`/api/admin/users/${person.id}/access`, { method: "PUT", body: { automations: chosen(), credentials: credentials() } }); toast("Access saved"); close(); show("users"); } catch (err) { toast(err.message, true); } } }, "Save access")]);
 }
 
 function resetDialog(person) {

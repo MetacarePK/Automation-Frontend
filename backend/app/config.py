@@ -28,8 +28,12 @@ def load_env_file(path: Path = ENV_FILE) -> None:
             continue
         key, value = line.split("=", 1)
         value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
+        if value[:1] in "\"'" and len(value) >= 2 and value[0] in value[1:]:
+            value = value[1:value.index(value[0], 1)]               # quoted: everything inside, '#' included
+        else:
+            for marker in (" #", "\t#"):                            # unquoted: " # comment" ends the value
+                if marker in value:
+                    value = value.split(marker, 1)[0].rstrip()
         os.environ.setdefault(key.strip(), value)
 
 
@@ -42,7 +46,12 @@ def _bool(name: str, default: bool) -> bool:
 
 def _int(name: str, default: int) -> int:
     raw = os.environ.get(name)
-    return int(raw) if raw and raw.strip() else default
+    if not raw or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(f"{name} must be a whole number, but it is {raw!r}. Fix it in backend/.env")
 
 
 @dataclass
