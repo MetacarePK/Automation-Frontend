@@ -15,6 +15,7 @@ from pathlib import Path
 
 import openpyxl
 from playwright.sync_api import sync_playwright  # noqa: F401  (real engines import it too)
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 from patients import read_patients, resolve_column_map
 
@@ -100,3 +101,19 @@ def run_automation(excel_path=None, column_map=None, workers=None, limit=None, o
     done = sum(1 for s in row_status.values() if s.startswith("Done"))
     return {"logged_in": True, "done": done, "total": len(row_status), "captured_columns": captured,
             "status_xlsx_path": out, "results": [], "all_visits": [], "row_status": row_status}
+
+
+def log_in(browser):
+    """Like the real engines' log_in(browser) -> (context, page, logged_in). The saved username picks the scenario:
+    'blocked' hangs on a challenge page and times out, 'badpass' is refused, anything else signs in."""
+    username = ""
+    for line in (BASE_DIR / ".env").read_text().splitlines():
+        if line.startswith("username="):
+            username = line.split("=", 1)[1].strip()
+    context = browser.new_context(no_viewport=True)
+    page = context.new_page()
+    page.goto("data:text/html,<title>Just a moment...</title><body><h1>Checking your browser before accessing</h1>"
+              "<input id='other' value='SHOULD-NOT-APPEAR'></body>")
+    if username == "blocked":
+        raise PlaywrightTimeout("Page.wait_for_selector: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"input#username\")")
+    return context, page, username != "badpass"

@@ -343,6 +343,7 @@ class JobManager:
         s = self.ctx.settings
         state = s.runs_dir / "_oneshot" / f"login-{time.time_ns()}.json"
         return self._oneshot(automation, {"mode": "login_check", "state_path": str(state),
+                                          "diagnostics_dir": str(s.storage_dir / "diagnostics" / automation.slug),
                                           "browser_channel": s.browser_channel, "browser_headless": s.browser_headless,
                                           "browser_window_size": s.window_size},
                              timeout=180)

@@ -47,6 +47,15 @@ def purge(ctx, now: datetime | None = None) -> dict:
                                 stats["stale_files"] += 1
                         except OSError:
                             pass
+        diagnostics = s.storage_dir / "diagnostics"
+        if diagnostics.exists():
+            for path in diagnostics.glob("**/*.png"):
+                try:
+                    if path.stat().st_mtime < limit:
+                        path.unlink()
+                        stats["stale_files"] += 1
+                except OSError:
+                    pass
         oneshot = s.runs_dir / "_oneshot"
         if oneshot.exists():
             for path in oneshot.glob("*"):

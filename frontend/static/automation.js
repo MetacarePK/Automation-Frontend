@@ -158,7 +158,17 @@ if (automation.can_manage_credentials) {
       return h("label", { class: "field", for: "cred-" + f.key }, f.label, input);
     }));
     const msg = h("div", { hidden: true });
-    const say = (ok, text) => { msg.hidden = false; msg.className = ok ? "form-ok" : "form-error"; msg.textContent = text; };
+    const say = (ok, text, result) => {
+      msg.hidden = false; msg.className = ok ? "form-ok" : "form-error"; msg.textContent = text;
+      // when the sign-in failed, show what the Office Ally page actually displayed
+      for (const page of (result && result.pages) || []) {
+        msg.append(h("div", { class: "diag" },
+          h("div", {}, h("b", { text: page.title || "(no title)" })), h("div", { class: "muted mono", text: page.url || "" }),
+          page.text ? h("div", { text: page.text }) : null,
+          page.window ? h("div", { class: "muted", text: `Browser window ${page.window[0]} x ${page.window[1]}` }) : null));
+      }
+      if (result && result.error) msg.append(h("div", { class: "muted mono", text: result.error }));
+    };
     const saveBtn = h("button", { onclick: async () => {
       msg.hidden = true;
       const values = {};
@@ -175,7 +185,7 @@ if (automation.can_manage_credentials) {
     const testBtn = h("button", { class: "secondary", onclick: async () => {
       if (!confirm("Sign in to Office Ally with the saved login to check it? Nothing is changed there.")) return;
       msg.hidden = true; testBtn.disabled = true; testBtn.textContent = "Testing...";
-      try { const r = await api(`/api/automations/${slug}/credentials/test`, { method: "POST" }); say(r.ok, r.message); }
+      try { const r = await api(`/api/automations/${slug}/credentials/test`, { method: "POST" }); say(r.ok, r.message, r); }
       catch (err) { say(false, err.message); }
       finally { testBtn.disabled = false; testBtn.textContent = "Test login"; }
     } }, "Test login");

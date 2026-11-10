@@ -192,12 +192,21 @@ def check_login(ctx: Context, slug: str, assume_yes: bool) -> int:
     if result.get("type") == "login_check" and result.get("ok"):
         print(f"PASS  signed in to Office Ally as the '{slug}' login ({result.get('url')})")
         return 0
-    if result.get("type") == "login_check":
-        print("FAIL  Office Ally did not accept the login. Check the username and password (Dashboard, or the automation's .env).")
-    else:
+    if result.get("type") != "login_check":
         print(f"FAIL  the test could not run: {result.get('error')}")
+        return 1
+    print("FAIL  the sign-in did not succeed." + (f" Error: {result['error']}" if result.get("error") else " Office Ally did not accept the login."))
+    for page in result.get("pages", []):
+        print("\n  page    :", page.get("url"))
+        print("  title   :", page.get("title"))
+        print("  window  :", page.get("window"), "  webdriver:", page.get("webdriver"))
+        print("  browser :", page.get("user_agent"))
+        print("  text    :", page.get("text"))
+        if page.get("screenshot"):
+            print("  picture :", page["screenshot"], " (copy out with: docker compose cp app:" + page["screenshot"] + " .)")
+        if page.get("error"):
+            print("  (could not inspect this page:", page["error"] + ")")
     return 1
-
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv

@@ -103,7 +103,7 @@ reuses a saved session; each automation uses one Office Ally account and two win
 | `describe` | `{"type":"describe","default_map":{...}}` |
 | `validate` | `{"type":"validated","ok":true,"total":N}` or `ok:false,error` (uses the engine's own reader) |
 | `run` | `{"type":"resume","carried":N}`, many `{"type":"rows","rows":[...]}`, then `{"type":"finished","ok","done","total","status_xlsx","status_column","summary"\|"error"}` |
-| `login_check` | `{"type":"login_check","ok":bool,"url":...}`: a REAL sign-in, deletes its session file, changes nothing in Office Ally |
+| `login_check` | `{"type":"login_check","ok":bool,"url":...}`: a REAL sign-in, deletes its session file, changes nothing in Office Ally. On failure also `error` and `pages[]` (url, title, visible text, user agent, window size, screenshot path under `storage/diagnostics/`) |
 | `browser_check` | `{"type":"browser_check","ok":true,"version":...}`: starts the configured browser on `about:blank` |
 
 `run` patches `main.DATA_DIR/OUTPUT_DIR/STATE_PATH` to the run folder and wraps `playwright BrowserType.launch` to force `channel` and `headless`.

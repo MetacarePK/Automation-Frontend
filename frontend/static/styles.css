@@ -243,3 +243,4 @@ ol.events li.warn span:last-child { color: var(--warn-ink); }
 .counts .c-carried b { color: var(--ink-2); }
 dl.config { margin: 0; padding: 14px 22px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 200px 1fr; gap: 6px 16px; font-size: 14px; }
 dl.config dt { color: var(--muted); } dl.config dd { margin: 0; overflow-wrap: anywhere; }
+.diag { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 4px; overflow-wrap: anywhere; font-weight: 400; }

@@ -103,6 +103,8 @@ docker compose exec app python -m app.cli check-login blackhill-aco
 docker compose exec app python -m app.cli check-login blackhill-non-aco
 ```
 
+If a check fails, it now prints what the Office Ally page actually showed (address, title, visible text, browser window and a screenshot path), which usually names the reason. Copy the screenshot out with `docker compose cp app:/path/shown/login-....png .`.
+
 Now follow **Part 3** of `deploy/README.md` (small real sheet per automation, both at once, stop, retry, restart, and compare a headless
 result with your Windows PC). Only after those pass should you rely on it. Until then, headless Chromium in Docker is unproven.
 

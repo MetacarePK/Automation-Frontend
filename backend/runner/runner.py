@@ -176,9 +176,36 @@ def mode_run(job: dict) -> int:
     return 0
 
 
+def describe_pages(contexts, diag_dir, tag: str) -> list:
+    """What every open page shows right now: address, title, visible text, browser identity and a screenshot.
+    Used when a login check fails, so the reason (a block page, a challenge, a layout change...) can be seen.
+    Input values (typed credentials) are never part of the visible text."""
+    out = []
+    for ci, context in enumerate(contexts):
+        for pi, page in enumerate(context.pages):
+            item = {"url": (page.url or "").split("?")[0].split("#")[0]}
+            try:
+                item["title"] = page.title()
+                item["text"] = " ".join(page.inner_text("body", timeout=3000).split())[:500]
+                item["user_agent"] = page.evaluate("navigator.userAgent")
+                item["webdriver"] = page.evaluate("navigator.webdriver")
+                item["window"] = page.evaluate("[innerWidth, innerHeight]")
+                if diag_dir:
+                    Path(diag_dir).mkdir(parents=True, exist_ok=True)
+                    shot = Path(diag_dir) / f"{tag}-{ci}{pi}.png"
+                    page.screenshot(path=str(shot), timeout=5000)
+                    item["screenshot"] = str(shot)
+            except Exception as exc:                       # a page that cannot be inspected is itself information
+                item["error"] = f"{type(exc).__name__}: {str(exc).splitlines()[0][:120] if str(exc) else ''}"
+            out.append(item)
+    return out
+
+
 def mode_login_check(job: dict) -> int:
-    """REAL Office Ally login with this automation's own credentials, then log out of nothing and
-    change nothing: used by `app.cli check-login` to prove the server can sign in."""
+    """REAL Office Ally login with this automation's own credentials, then closes the browser: nothing is
+    created or changed there. Used by `app.cli check-login` and the dashboard's "Test login" button.
+    On failure it reports what the page showed (see describe_pages)."""
+    import time
     import main as engine
     from playwright.sync_api import sync_playwright
 
@@ -186,12 +213,29 @@ def mode_login_check(job: dict) -> int:
     state.parent.mkdir(parents=True, exist_ok=True)
     engine.STATE_PATH = state
     patch_browser(job.get("browser_channel") or None, job.get("browser_headless"), job.get("browser_window_size"))
+    diag_dir = job.get("diagnostics_dir")
+    tag = f"login-{time.strftime('%Y%m%d-%H%M%S')}"
+    contexts = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge", headless=False, args=["--start-maximized"])
+            original_new_context = browser.new_context
+
+            def tracking_new_context(*args, **kwargs):      # remember the contexts the engine opens so they can be inspected
+                context = original_new_context(*args, **kwargs)
+                contexts.append(context)
+                return context
+            browser.new_context = tracking_new_context
             try:
                 context, page, ok = engine.log_in(browser)
-                emit({"type": "login_check", "ok": bool(ok), "url": page.url.split("?")[0]})
+                result = {"type": "login_check", "ok": bool(ok), "url": page.url.split("?")[0]}
+                if not ok:
+                    result["pages"] = describe_pages(contexts, diag_dir, tag)
+                emit(result)
+            except Exception as exc:
+                message = str(exc).splitlines()[0][:200] if str(exc) else ""
+                emit({"type": "login_check", "ok": False, "error": f"{type(exc).__name__}: {message}",
+                      "pages": describe_pages(contexts, diag_dir, tag)})
             finally:
                 browser.close()
     finally:

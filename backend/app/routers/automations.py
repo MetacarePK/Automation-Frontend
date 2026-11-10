@@ -309,5 +309,10 @@ def test_credentials(slug: str, request: Request, user=Depends(require_user), ct
                      details={"ok": ok}, ip=client_ip(request, ctx.settings.trust_proxy))
     if ok:
         return {"ok": True, "message": "Signed in to Office Ally successfully."}
-    return {"ok": False, "message": "Could not sign in. Check the username and password."
-            if result.get("type") == "login_check" else "The test could not run on the server. See the server log."}
+    if result.get("type") != "login_check":
+        return {"ok": False, "message": "The test could not run on the server. See the server log."}
+    # Reached the login page but did not get in: say what the page showed (no credentials are ever in this text).
+    pages = [{k: v for k, v in p.items() if k != "screenshot"} for p in result.get("pages", [])]
+    message = ("Office Ally did not accept the login. Check the username and password."
+               if not result.get("error") else "The sign-in did not complete. The page showed:")
+    return {"ok": False, "message": message, "error": result.get("error"), "pages": pages}
