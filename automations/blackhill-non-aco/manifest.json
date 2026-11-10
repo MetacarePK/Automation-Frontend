@@ -1,0 +1,80 @@
+{
+  "slug": "blackhill-non-aco",
+  "name": "Blackhill Non ACO",
+  "description": "Creates Non ACO visits in Practice Mate from a billing sheet.",
+  "accent": "#2d5fa8",
+  "insurance_id_label": "Beneficiary ID",
+  "required_fields": {
+    "name": "Patient Name",
+    "dob": "Patient DOB"
+  },
+  "input_fields": [
+    [
+      "name",
+      "Patient Name",
+      true
+    ],
+    [
+      "dob",
+      "Patient DOB",
+      true
+    ],
+    [
+      "provider",
+      "Provider Name",
+      false
+    ],
+    [
+      "dos",
+      "DOS (date of service)",
+      false
+    ],
+    [
+      "cpt",
+      "CPT",
+      false
+    ],
+    [
+      "pos",
+      "POS (place of service)",
+      false
+    ],
+    [
+      "modifier",
+      "Modifier",
+      false
+    ],
+    [
+      "icd10",
+      "ICD10",
+      false
+    ],
+    [
+      "facility",
+      "Facility Name",
+      false
+    ],
+    [
+      "beneficiary_id",
+      "Primary Beneficiary ID (Insurance ID)",
+      false
+    ]
+  ],
+  "output_fields": [
+    [
+      "status",
+      "Status",
+      false
+    ],
+    [
+      "visit_id",
+      "Visit ID",
+      false
+    ],
+    [
+      "line_charge",
+      "Line Charges",
+      false
+    ]
+  ]
+}

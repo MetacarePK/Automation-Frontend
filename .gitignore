@@ -1,0 +1,16 @@
+# secrets and runtime data - never commit
+.env
+**/.env
+storage/
+*.db
+*.db-wal
+*.db-shm
+auth_state.json
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+*.xlsx
+*.csv
+!automations/*/HCC/HCC.csv

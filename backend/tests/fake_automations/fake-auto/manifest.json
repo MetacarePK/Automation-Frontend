@@ -1,0 +1,9 @@
+{
+  "slug": "fake-auto",
+  "name": "Fake Automation",
+  "description": "Test double with the same engine contract as the Blackhill engines.",
+  "insurance_id_label": "Ins ID",
+  "required_fields": {"name": "Patient", "dob": "DOB"},
+  "input_fields": [["name", "Patient", true], ["dob", "DOB", true]],
+  "output_fields": [["status", "Status", false], ["visit_id", "Visit ID", false]]
+}

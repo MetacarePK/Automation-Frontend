@@ -1,0 +1,9 @@
+# Caddy gets and renews the HTTPS certificate for your domain by itself.
+# Replace the domain; point its DNS A record at this server first.
+automation.example.com {
+    encode gzip
+    request_body {
+        max_size 30MB
+    }
+    reverse_proxy 127.0.0.1:8000
+}

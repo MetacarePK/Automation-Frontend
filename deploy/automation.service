@@ -1,0 +1,18 @@
+# Linux: /etc/systemd/system/automation.service
+# Needs a screen-less browser: set AUTOMATION_BROWSER_CHANNEL=chromium and AUTOMATION_HEADLESS=true in the env file.
+[Unit]
+Description=Automation dashboard
+After=network.target
+
+[Service]
+User=automation
+WorkingDirectory=/opt/automation/app/backend
+EnvironmentFile=/opt/automation/app/backend/.env
+ExecStart=/opt/automation/venv/bin/python -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+# Stopping the service also stops any browsers a run started.
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

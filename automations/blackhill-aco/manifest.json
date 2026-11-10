@@ -1,0 +1,80 @@
+{
+  "slug": "blackhill-aco",
+  "name": "Blackhill ACO",
+  "description": "Creates ACO visits in Practice Mate from a billing sheet.",
+  "accent": "#1f7a5c",
+  "insurance_id_label": "iNS ID",
+  "required_fields": {
+    "name": "Patient",
+    "dob": "Birthdate"
+  },
+  "input_fields": [
+    [
+      "name",
+      "Patient",
+      true
+    ],
+    [
+      "dob",
+      "Birthdate",
+      true
+    ],
+    [
+      "provider",
+      "Billing Provider",
+      false
+    ],
+    [
+      "dos",
+      "Treatment Date",
+      false
+    ],
+    [
+      "cpt",
+      "CPT",
+      false
+    ],
+    [
+      "pos",
+      "Place of Service",
+      false
+    ],
+    [
+      "modifier",
+      "Hospice Modifier",
+      false
+    ],
+    [
+      "icd10",
+      "ICD",
+      false
+    ],
+    [
+      "facility",
+      "Ivy Hill (Facility)",
+      false
+    ]
+  ],
+  "output_fields": [
+    [
+      "status",
+      "Status",
+      false
+    ],
+    [
+      "visit_id",
+      "Visit ID",
+      false
+    ],
+    [
+      "beneficiary_id",
+      "iNS ID (Insurance ID)",
+      false
+    ],
+    [
+      "line_charge",
+      "Line Charges",
+      false
+    ]
+  ]
+}
