@@ -47,16 +47,17 @@ def test_full_run_records_rows_counts_log_download_and_audit(make_client, settin
     r = start(c)
     assert r.status_code == 201 and r.json()["total"] == 3
     run = wait_for(c, r.json()["run_id"])
-    assert run["status"] == "succeeded", run
-    assert run["counts"] == {"duplicate": 1, "created": 1, "not_created": 1, "done": 2, "seen": 3}
+    assert run["status"] == "completed_with_errors", run                # one patient was not created
+    assert "1 row(s) not created" in run["summary"]
+    assert run["counts"] == {"duplicate": 1, "created": 1, "not_created": 1, "done": 2, "seen": 3, "carried": 0, "pending": 0}
     assert {x["patient_name"] for x in run["rows"]} == {"Ann", "Bob DUP", "MISS Cy"}
     assert "Run" in "\n".join(c.get(f"/api/runs/{run['id']}/log").json()["lines"])
     dl = c.get(f"/api/runs/{run['id']}/download")
     assert dl.status_code == 200 and dl.content[:2] == b"PK"
     actions = [e["action"] for e in c.get("/api/account/activity").json()["events"]]
-    assert {"run_queued", "run_succeeded", "download", "sheet_uploaded", "login"} <= set(actions)
-    # the engine wrote its saved-login file to the PATCHED location, not into the engine folder
-    assert (settings.uploads_dir / "fake-auto" / "auth_state.json").exists()
+    assert {"run_queued", "run_completed_with_errors", "download", "sheet_uploaded", "login"} <= set(actions)
+    # the engine's saved login lives in the run's own folder and is deleted afterwards; never in the engine folder
+    assert not (settings.runs_dir / str(run["id"]) / "auth_state.json").exists()
     assert not (settings.automations_dir / "fake-auto" / "auth_state.json").exists()
 
 
@@ -127,9 +128,9 @@ def test_restart_marks_inflight_runs_failed_and_resumes_queue(settings, ctx, mak
                          (uid, status))
     ctx.jobs.start()                    # what a server restart does
     runs = {r["id"]: r for r in c.get("/api/runs").json()["runs"]}
-    assert runs[1]["status"] == "failed" and "restarted" in runs[1]["error"]
-    run2 = wait_for(c, 2)               # queued run was picked up (and fails: its sheet is gone)
-    assert run2["status"] == "failed"
+    assert runs[1]["status"] == "interrupted" and "server stopped" in runs[1]["error"]
+    run2 = wait_for(c, 2)               # the queued run was picked up (and fails: its sheet is gone)
+    assert run2["status"] == "failed" and run2["failure_kind"] == "invalid_input"
 
 
 def test_workers_are_capped_by_settings(make_client, ctx):

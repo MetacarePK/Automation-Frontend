@@ -23,9 +23,18 @@ PASSWORD = "Str0ngPassw0rd"
 def settings(tmp_path):
     automations = tmp_path / "automations"
     shutil.copytree(FAKES, automations)
+    # a second automation (its own Office Ally account) to test concurrency between automations
+    second = automations / "fake-auto-2"
+    shutil.copytree(automations / "fake-auto", second)
+    manifest = (second / "manifest.json").read_text().replace('"fake-auto"', '"fake-auto-2"').replace("Fake Automation", "Fake Two")
+    (second / "manifest.json").write_text(manifest)
+    for folder in (automations / "fake-auto", second):          # engines read their login from .env (git-ignored, so written here)
+        (folder / ".env").write_text("username=fakeuser\npassword=Sup3rSecret!\n")
     s = Settings(storage_dir=tmp_path / "storage", automations_dir=automations,
                  frontend_dir=Path(__file__).resolve().parents[2] / "frontend")
     s.max_failed_logins, s.lockout_minutes = 5, 15
+    s.auto_retries, s.retry_backoff_seconds = 1, 1
+    s.retention_files_days = s.retention_rows_days = 0       # retention is tested explicitly
     return s
 
 
@@ -45,14 +54,15 @@ def ctx(app):
     return app.state.ctx
 
 
-def add_user(ctx, email, role="user", status="active", name="Test User", slugs=("fake-auto",)):
+def add_user(ctx, email, role="user", status="active", name="Test User", slugs=("fake-auto",), creds=()):
     with ctx.db.transaction() as conn:
         uid = conn.execute(
             "INSERT INTO users (email,name,password_hash,role,status,created_at) VALUES (?,?,?,?,?,?)",
             (email, name, hash_password(PASSWORD), role, status, utcnow())).lastrowid
         if status == "active":
             for slug in slugs:
-                conn.execute("INSERT INTO user_automations VALUES (?,?,?,NULL)", (uid, slug, utcnow()))
+                conn.execute("INSERT INTO user_automations (user_id, automation_slug, granted_at, can_manage_credentials)"
+                             " VALUES (?,?,?,?)", (uid, slug, utcnow(), 1 if slug in creds else 0))
     return uid
 
 
@@ -90,7 +100,10 @@ def xlsx_bytes(rows, header=("Patient", "DOB")):
     return buf.getvalue()
 
 
-def wait_for(client, run_id, states=("succeeded", "failed", "cancelled"), timeout=40):
+TERMINAL = ("completed", "completed_with_errors", "failed", "interrupted", "cancelled")
+
+
+def wait_for(client, run_id, states=TERMINAL, timeout=40):
     end = time.time() + timeout
     while time.time() < end:
         data = client.get(f"/api/runs/{run_id}").json()

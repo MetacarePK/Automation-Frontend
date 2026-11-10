@@ -185,6 +185,10 @@ MIGRATIONS = [
     );
     CREATE INDEX idx_run_events_run ON run_events(run_id, id);
     """,
+    # 3 - per-person, per-automation permission to update the Office Ally login (admins always may)
+    """
+    ALTER TABLE user_automations ADD COLUMN can_manage_credentials INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 

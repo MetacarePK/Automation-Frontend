@@ -9,6 +9,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+DEFAULT_CREDENTIAL_FIELDS = [
+    {"key": "username", "label": "Username", "secret": False, "aliases": ["user", "oa_username"]},
+    {"key": "password", "label": "Password", "secret": True, "aliases": ["pass", "oa_password"]},
+]
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,48}$")
 
 
@@ -27,6 +31,7 @@ class Automation:
     input_fields: list
     output_fields: list
     max_concurrent_runs: int
+    credential_fields: list
     engine_dir: Path = field(compare=False)
 
     def public(self) -> dict:
@@ -67,6 +72,8 @@ def _load_one(folder: Path) -> Automation:
         # How many runs of this automation may use its Office Ally login at once. Keep 1 unless
         # separate accounts/sessions have been verified safe.
         max_concurrent_runs=max(1, int(raw.get("max_concurrent_runs", 1))),
+        # The login the engine reads from its .env. Defaults match both Blackhill engines.
+        credential_fields=raw.get("credential_fields") or DEFAULT_CREDENTIAL_FIELDS,
         engine_dir=folder)
 
 

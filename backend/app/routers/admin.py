@@ -33,11 +33,13 @@ def _revoke_sessions(conn, user_id: int):
                  (utcnow(), user_id))
 
 
-def _set_access(conn, user_id: int, slugs, granted_by: int):
+def _set_access(conn, user_id: int, slugs, granted_by: int, credential_slugs=()):
+    """Replace a person's automations. `credential_slugs` (a subset) may also update that automation's login."""
     conn.execute("DELETE FROM user_automations WHERE user_id=?", (user_id,))
+    allowed = set(credential_slugs)
     for slug in dict.fromkeys(slugs):
-        conn.execute("INSERT INTO user_automations (user_id, automation_slug, granted_at, granted_by)"
-                     " VALUES (?,?,?,?)", (user_id, slug, utcnow(), granted_by))
+        conn.execute("INSERT INTO user_automations (user_id, automation_slug, granted_at, granted_by, can_manage_credentials)"
+                     " VALUES (?,?,?,?,?)", (user_id, slug, utcnow(), granted_by, 1 if slug in allowed else 0))
 
 
 def _check_slugs(ctx: Context, slugs):
@@ -74,7 +76,7 @@ def overview(admin=Depends(require_admin), ctx: Context = Depends(get_ctx)):
             "SELECT status, COUNT(*) AS n FROM runs WHERE queued_at>=? GROUP BY status", (today,))}
         live_runs = conn.execute(
             "SELECT r.id, r.automation_slug, r.status, r.sheet_name, r.total, r.started_at, u.email AS user_email"
-            " FROM runs r JOIN users u ON u.id=r.user_id WHERE r.status IN ('running','queued')"
+            " FROM runs r JOIN users u ON u.id=r.user_id WHERE r.status IN ('validating','running','queued')"
             " ORDER BY r.id").fetchall()
         recent_failed = conn.execute(
             "SELECT email, reason, ip, created_at FROM login_events WHERE success=0"
@@ -124,14 +126,17 @@ def users(admin=Depends(require_admin), ctx: Context = Depends(get_ctx),
         out = []
         for row in rows:
             item = dict(row)
-            item["automations"] = [r["automation_slug"] for r in conn.execute(
-                "SELECT automation_slug FROM user_automations WHERE user_id=?", (row["id"],))]
+            access = conn.execute("SELECT automation_slug, can_manage_credentials FROM user_automations WHERE user_id=?",
+                                  (row["id"],)).fetchall()
+            item["automations"] = [r["automation_slug"] for r in access]
+            item["credential_automations"] = [r["automation_slug"] for r in access if r["can_manage_credentials"]]
             out.append(item)
     return {"users": out, "all_automations": [a.public() for a in ctx.registry.all()]}
 
 
 class ApproveBody(BaseModel):
     automations: list[str] | None = None      # None = every automation
+    credentials: list[str] = []               # automations whose login this person may update
 
 
 @router.post("/users/{user_id}/approve")
@@ -139,13 +144,14 @@ def approve(user_id: int, body: ApproveBody, request: Request,
             admin=Depends(require_admin), ctx: Context = Depends(get_ctx)):
     slugs = body.automations if body.automations is not None else ctx.registry.slugs()
     _check_slugs(ctx, slugs)
+    _check_slugs(ctx, body.credentials)
     with ctx.db.transaction() as conn:
         user = _get_user(conn, user_id)
         conn.execute("UPDATE users SET status='active', approved_at=?, approved_by=?, failed_attempts=0,"
                      " locked_until=NULL WHERE id=?", (utcnow(), admin["id"], user_id))
-        _set_access(conn, user_id, slugs, admin["id"])
+        _set_access(conn, user_id, slugs, admin["id"], body.credentials)
         log_activity(conn, user=admin, action="user_approved", target_type="user", target_id=user_id,
-                     details={"email": user["email"], "automations": slugs},
+                     details={"email": user["email"], "automations": slugs, "can_update_login": body.credentials},
                      ip=client_ip(request, ctx.settings.trust_proxy))
     return {"ok": True}
 
@@ -179,17 +185,19 @@ def enable(user_id: int, request: Request, admin=Depends(require_admin),
 
 class AccessBody(BaseModel):
     automations: list[str]
+    credentials: list[str] = []
 
 
 @router.put("/users/{user_id}/access")
 def set_access(user_id: int, body: AccessBody, request: Request,
                admin=Depends(require_admin), ctx: Context = Depends(get_ctx)):
     _check_slugs(ctx, body.automations)
+    _check_slugs(ctx, body.credentials)
     with ctx.db.transaction() as conn:
         user = _get_user(conn, user_id)
-        _set_access(conn, user_id, body.automations, admin["id"])
+        _set_access(conn, user_id, body.automations, admin["id"], body.credentials)
         log_activity(conn, user=admin, action="access_changed", target_type="user", target_id=user_id,
-                     details={"email": user["email"], "automations": body.automations},
+                     details={"email": user["email"], "automations": body.automations, "can_update_login": body.credentials},
                      ip=client_ip(request, ctx.settings.trust_proxy))
     return {"ok": True}
 

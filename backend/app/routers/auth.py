@@ -33,6 +33,8 @@ def public_user(conn, user) -> dict:
         "id": user["id"], "email": user["email"], "name": user["name"],
         "role": user["role"], "status": user["status"],
         "automations": user_automation_slugs(conn, user),
+        "credential_automations": [r["automation_slug"] for r in conn.execute(
+            "SELECT automation_slug FROM user_automations WHERE user_id=? AND can_manage_credentials=1", (user["id"],))],
     }
 
 
@@ -68,7 +70,7 @@ def signup(body: SignupBody, request: Request, ctx: Context = Depends(get_ctx)):
         new_id = cur.lastrowid
         if status == "active":
             for slug in ctx.registry.slugs():
-                conn.execute("INSERT INTO user_automations VALUES (?,?,?,NULL)", (new_id, slug, utcnow()))
+                conn.execute("INSERT INTO user_automations (user_id, automation_slug, granted_at) VALUES (?,?,?)", (new_id, slug, utcnow()))
         log_activity(conn, action="signup", actor_email=email, target_type="user",
                      target_id=new_id, details={"status": status}, ip=ip)
     return {"message": SIGNUP_MESSAGE}
